@@ -145,4 +145,11 @@
   code, kbd, pre, samp {
     @apply font-mono;
   }
+
+  /* Game chrome: the canvas owns the whole viewport. No page scroll,
+   * no pull-to-refresh / overscroll bounce eating touch input. */
+  html, body {
+    height: 100%;
+    overscroll-behavior: none;
+  }
 }

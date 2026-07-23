@@ -1,8 +1,8 @@
-"""initial schema: users + posts
+"""initial schema: users + scores
 
 Revision ID: 0001
 Revises:
-Create Date: 2026-06-01 12:00:00.000000
+Create Date: 2026-07-23 12:00:00.000000
 
 """
 from typing import Sequence, Union
@@ -41,29 +41,26 @@ def upgrade() -> None:
     op.create_index("ix_users_coders_id", "users", ["coders_id"])
 
     op.create_table(
-        "posts",
+        "scores",
         sa.Column("id", sa.UUID(as_uuid=True), primary_key=True),
         sa.Column(
-            "author_id",
+            "user_id",
             sa.UUID(as_uuid=True),
             sa.ForeignKey("users.id", ondelete="CASCADE"),
+            unique=True,
             nullable=False,
         ),
-        sa.Column("body", sa.String(280), nullable=False),
+        sa.Column("best_score", sa.Integer, nullable=False, server_default="0"),
         sa.Column(
-            "created_at",
+            "updated_at",
             sa.DateTime(timezone=True),
             nullable=False,
             server_default=sa.func.now(),
         ),
     )
-    op.create_index("ix_posts_author_id", "posts", ["author_id"])
-    op.create_index("ix_posts_created_at", "posts", ["created_at"])
 
 
 def downgrade() -> None:
-    op.drop_index("ix_posts_created_at", table_name="posts")
-    op.drop_index("ix_posts_author_id", table_name="posts")
-    op.drop_table("posts")
+    op.drop_table("scores")
     op.drop_index("ix_users_coders_id", table_name="users")
     op.drop_table("users")

@@ -1,5 +1,5 @@
 [project]
-name = "template-coders-backend"
+name = "template-coders-game-backend"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
@@ -28,6 +28,11 @@ packages = ["app"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# One event loop for the whole test session: the async engine (and its
+# pooled asyncpg connections) must be used from the loop that created
+# them, and pytest-asyncio 1.x defaults to a fresh loop per test.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 
 [tool.ruff]
 target-version = "py312"

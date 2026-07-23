@@ -5,8 +5,9 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.core.database import AsyncSessionLocal
-from app.routes.posts import router as posts_router
+from app.routes.leaderboard import router as leaderboard_router
 from app.routes.users import router as users_router
+from app.routes.ws import router as ws_router
 
 
 @asynccontextmanager
@@ -15,7 +16,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="template-coders API",
+    title="template-coders-game API",
     version="0.1.0",
     lifespan=lifespan,
     docs_url="/api/docs",
@@ -23,7 +24,8 @@ app = FastAPI(
 )
 
 app.include_router(users_router)
-app.include_router(posts_router)
+app.include_router(leaderboard_router)
+app.include_router(ws_router)
 
 
 @app.get("/api/health")

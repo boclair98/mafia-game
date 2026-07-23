@@ -1,11 +1,16 @@
-# Local dev for template-coders.
+# Local dev for template-coders (game).
 #
 #   docker compose up
 #
 # Brings up:
 #   db        — Postgres 16 on :5432
 #   backend   — FastAPI on :8000, alembic upgrade + reload
-#   frontend  — Next.js dev on :3000 (proxies /api/* to backend)
+#   frontend  — Next.js dev on :3000 (proxies REST /api/* to backend)
+#
+# The game WebSocket does NOT go through the Next dev server (it can't
+# proxy sockets) — the browser connects straight to ws://localhost:8000
+# in dev (see frontend/lib/ws.ts), which is why the backend's port is
+# published here.
 #
 # Zero setup: `docker compose up` works on a fresh clone — no .env needed.
 #

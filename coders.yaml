@@ -27,6 +27,12 @@ services:
     context: frontend
     port: 80
     expose: public
+    # The game WebSocket passes through this nginx on its way to the
+    # api, and Knative caps any request — an upgraded socket included —
+    # at the service's timeout (default 300s). Max it out on EVERY
+    # service the socket traverses (PLATFORM.md §5a). Sockets still
+    # drop on redeploys/preemption; the client reconnects (lib/ws.ts).
+    timeout: 3600
     env:
       BACKEND_URL: ${api.internal_url}
 
@@ -40,6 +46,8 @@ services:
     # A COPY of a path outside the context is the usual opaque build failure.
     context: backend
     port: 8000
+    # Same reasoning as web — the socket terminates here.
+    timeout: 3600
     env:
       DATABASE_URL: postgresql+asyncpg://${db.user}:${db.password}@${db.host}:${db.port}/${db.name}
 

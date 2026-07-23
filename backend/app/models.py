@@ -12,11 +12,12 @@ class User(Base):
 
     coders.kr already knows who this visitor is (they signed in via
     `mcp.coders.kr/sso/login`); we keep a row in our own DB the first
-    time we see them so app-local data (Posts, preferences, …) can FK
+    time we see them so app-local data (Scores, unlocks, …) can FK
     against a stable local UUID without joining out to the platform.
 
-    When the platform someday hands us extra profile fields, sync
-    `display_name` / `avatar_url` here on each request.
+    Sign-in is OPTIONAL in this template: anonymous visitors play as
+    guests and never get a row here — only signed-in players are
+    persisted (that's what makes the leaderboard survive reconnects).
     """
 
     __tablename__ = "users"
@@ -28,8 +29,8 @@ class User(Base):
     coders_id: Mapped[uuid.UUID] = mapped_column(
         sa.UUID(as_uuid=True), unique=True, nullable=False, index=True
     )
-    # Editable inside the app. Default to a short slice of coders_id so
-    # something shows up before the user picks a name.
+    # The visitor's coders.kr display name when they've set one
+    # (X-Coders-User-Name), else a generated `user-<id8>` handle.
     display_name: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     first_seen_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now()
@@ -38,25 +39,30 @@ class User(Base):
         sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
     )
 
-    posts: Mapped[list["Post"]] = relationship(
-        back_populates="author", cascade="all, delete-orphan"
+    score: Mapped["Score | None"] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
     )
 
 
-class Post(Base):
-    """A short message authored by a logged-in user."""
+class Score(Base):
+    """A signed-in player's best score — one row per user, upserted with
+    GREATEST() at session end so a concurrent session can't lower it.
 
-    __tablename__ = "posts"
+    Live/in-round scores never touch the DB (they live in the in-memory
+    Room, see app/game.py); only the end-of-session best is persisted.
+    """
+
+    __tablename__ = "scores"
 
     id: Mapped[uuid.UUID] = mapped_column(
         sa.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    author_id: Mapped[uuid.UUID] = mapped_column(
-        sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False
     )
-    body: Mapped[str] = mapped_column(sa.String(280), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        sa.DateTime(timezone=True), server_default=sa.func.now(), index=True
+    best_score: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()
     )
 
-    author: Mapped[User] = relationship(back_populates="posts")
+    user: Mapped[User] = relationship(back_populates="score")

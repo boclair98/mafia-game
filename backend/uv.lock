@@ -666,7 +666,7 @@ wheels = [
 ]
 
 [[package]]
-name = "template-coders-backend"
+name = "template-coders-game-backend"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
