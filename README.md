@@ -14,6 +14,30 @@ deploy, and you have a live site that:
 Use it as a base when you want to write something that lives natively
 on coders.kr rather than retrofitting an existing app.
 
+## Picking a template
+
+This repo is a small **catalog of starters, one per branch**. `main` is
+the Basic Full-Stack Web template documented below; every other
+template is a sibling branch with the same platform wiring
+(`coders.yaml`, identity, Dockerfiles) but a different app shape.
+Clone the one that matches what you're building:
+
+| Template | Branch | When to use it |
+|---|---|---|
+| **Basic Full-Stack Web** | `main` | CRUD apps, feeds, dashboards — anything request/response. Next.js static SPA + FastAPI + Postgres. |
+| **Game (Realtime)** | `game` | Multiplayer / realtime apps. Adds a WebSocket game loop with rooms, a fullscreen canvas client with reconnect + interpolation, optional sign-in (guests can play), and a persistent leaderboard. |
+
+```bash
+# Basic (this branch)
+git clone https://github.com/coders-kr/template-coders <name>
+
+# Game
+git clone -b game --single-branch https://github.com/coders-kr/template-coders <name>
+```
+
+Then `rm -rf .git && git init -b main` and make it yours — a template
+branch is a starting point, not something you track upstream.
+
 ## What the platform gives you
 
 When a request reaches this app, the platform has already done four
