@@ -74,4 +74,10 @@ def test_ping_gets_pong():
             ws.receive_json()
             ws.receive_json()
             ws.send_json({"t": "ping"})
-            assert ws.receive_json()["t"] == "pong"
+            # The one-second room snapshot can already be queued ahead of
+            # the direct pong; ordering between the ticker and this client
+            # frame is intentionally not guaranteed.
+            for _ in range(4):
+                if ws.receive_json()["t"] == "pong":
+                    return
+            pytest.fail("pong was not returned")
