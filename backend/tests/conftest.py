@@ -24,12 +24,11 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
+from app.core.database import Base
+from app.main import app
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-
-from app.core.database import Base
-from app.main import app
 
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",

@@ -6,6 +6,7 @@ on first sight, keyed on `coders_id` (the platform identity).
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -44,9 +45,9 @@ async def upsert_local_user(
 
 @router.get("/me")
 async def me(
-    coders_id: UUID = Depends(require_identity),
-    platform_name: str | None = Depends(optional_display_name),
-    session: AsyncSession = Depends(get_session),
+    coders_id: Annotated[UUID, Depends(require_identity)],
+    platform_name: Annotated[str | None, Depends(optional_display_name)],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict:
     """Return the signed-in visitor's app-local user row.
 

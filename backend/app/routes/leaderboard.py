@@ -9,6 +9,7 @@ sign in and your best score survives the session.
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -33,7 +34,7 @@ class LeaderboardEntry(BaseModel):
 
 @router.get("/leaderboard", response_model=list[LeaderboardEntry])
 async def leaderboard(
-    session: AsyncSession = Depends(get_session),
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[LeaderboardEntry]:
     """Top 20, best first. Public — no identity needed."""
     res = await session.execute(
