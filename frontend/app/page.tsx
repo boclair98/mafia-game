@@ -50,6 +50,17 @@ const PHASE_ALERT_META: Record<GameState["phase"], { kicker: string; title: stri
   gameover: { kicker: "CASE CLOSED", title: "사건이 종료되었습니다", copy: "승리 팀과 모든 배역을 확인하세요.", icon: Sparkles },
 };
 
+const PHASE_NARRATION: Record<GameState["phase"], string> = {
+  lobby: "용의자 대기실입니다. 참가자가 모두 준비되면 사건을 시작하십시오.",
+  reveal: "배역이 공개되었습니다. 자신의 정체를 숨기고, 첫 번째 밤을 준비하십시오.",
+  night: "밤이 되었습니다. 모두 눈을 감고, 역할이 있는 사람만 조용히 행동하십시오.",
+  dawn: "새벽이 밝았습니다. 밤사이 발생한 사건 보고를 확인합니다.",
+  day: "토론을 시작합니다. 발언 속 거짓말과 모순을 찾아내십시오.",
+  vote: "시민 투표를 시작합니다. 처형할 용의자 한 명을 선택하십시오.",
+  result: "투표를 마감합니다. 도시의 판결을 공개합니다.",
+  gameover: "사건이 종료되었습니다. 승리 팀과 최종 사건 기록을 확인하십시오.",
+};
+
 const PHASE_TRACK: GameState["phase"][] = ["reveal", "night", "dawn", "day", "vote", "result"];
 const PHASE_THREAT: Record<GameState["phase"], number> = { lobby: 8, reveal: 24, night: 72, dawn: 58, day: 42, vote: 82, result: 94, gameover: 100 };
 type AudioWindow = Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
@@ -212,15 +223,22 @@ export default function GamePage() {
   }, [tutorialOpen]);
 
   useEffect(() => {
-    if (!voiceOn || !game?.guide || !("speechSynthesis" in window)) return;
+    if (!voiceOn || !soundPhase || !("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
-    const line = new SpeechSynthesisUtterance(game.guide);
+    const line = new SpeechSynthesisUtterance(PHASE_NARRATION[soundPhase]);
+    const voices = window.speechSynthesis.getVoices();
+    const koreanVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith("ko"));
+    line.voice = koreanVoices.find((voice) => /(injoon|hyunsu|male|남성|natural|neural)/i.test(voice.name))
+      ?? koreanVoices.find((voice) => /(google|microsoft|apple)/i.test(voice.name))
+      ?? koreanVoices[0]
+      ?? null;
     line.lang = "ko-KR";
-    line.rate = 0.95;
-    line.pitch = 0.88;
+    line.rate = 0.82;
+    line.pitch = 0.72;
+    line.volume = 0.92;
     window.speechSynthesis.speak(line);
     return () => window.speechSynthesis.cancel();
-  }, [game?.guide, voiceOn]);
+  }, [soundPhase, voiceOn]);
 
   useEffect(() => {
     if (!joined || !room || !nick) return;
@@ -505,13 +523,14 @@ export default function GamePage() {
             <div className="phase-alert-icon"><PhaseAlertIcon size={30} /></div>
             <h2>{alertMeta.title}</h2>
             <p>{alertMeta.copy}</p>
+            {voiceOn && <div className="phase-alert-voice"><Volume2 size={13} /><span>{PHASE_NARRATION[phaseAlert]}</span></div>}
             {remaining > 0 && <div className="phase-alert-countdown"><b>{remaining}</b><span>초 남음</span></div>}
             <div className="phase-alert-line"><i /></div>
           </div>
         </div>
       )}
       <header className="topbar">
-        <div className="mini-brand"><Moon size={18} fill="currentColor" /><span>검은 자정</span><button className="guide-button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}><Film size={13} />룰 안내</button><button className={`guide-button ${voiceOn ? "active" : ""}`} onClick={toggleVoice} aria-label="AI 음성 안내 켜기 또는 끄기">{voiceOn ? <Volume2 size={13} /> : <VolumeX size={13} />}음성</button><button className={`guide-button ${soundOn ? "active" : ""}`} onClick={toggleSound} aria-label="게임 효과음 켜기 또는 끄기">{soundOn ? <Radio size={13} /> : <VolumeX size={13} />}효과음</button></div>
+        <div className="mini-brand"><Moon size={18} fill="currentColor" /><span>검은 자정</span><button className="guide-button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}><Film size={13} />룰 안내</button><button className={`guide-button ${voiceOn ? "active" : ""}`} onClick={toggleVoice} aria-label="게임 진행 음성 켜기 또는 끄기">{voiceOn ? <Volume2 size={13} /> : <VolumeX size={13} />}진행 음성</button><button className={`guide-button ${soundOn ? "active" : ""}`} onClick={toggleSound} aria-label="게임 효과음 켜기 또는 끄기">{soundOn ? <Radio size={13} /> : <VolumeX size={13} />}효과음</button></div>
         <div className="room-pill"><span>ROOM</span><b>{room}</b><button onClick={copyInvite} aria-label="초대 링크 복사">{copied ? <Check size={15} /> : <Clipboard size={15} />}</button><button onClick={() => setInviteOpen(true)} aria-label="친구 초대 열기"><UserPlus size={15} /></button></div>
         <div className={`connection ${status}`}><i />{status === "open" ? `${game.players.filter((p) => p.connected).length}명 접속` : "재연결 중"}</div>
       </header>
