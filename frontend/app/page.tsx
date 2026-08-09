@@ -227,7 +227,7 @@ export default function GamePage() {
   const remaining = game ? secondsLeft(game.deadline, now) : 0;
   const alertMeta = phaseAlert ? PHASE_ALERT_META[phaseAlert] : null;
   const PhaseAlertIcon = alertMeta?.icon ?? Moon;
-  const phaseProgressIndex = game.phase === "gameover" ? PHASE_TRACK.length : PHASE_TRACK.indexOf(game.phase);
+  const phaseProgressIndex = game?.phase === "gameover" ? PHASE_TRACK.length : game ? PHASE_TRACK.indexOf(game.phase) : -1;
   const canChat = game && ["lobby", "day", "vote", "gameover"].includes(game.phase)
     || game?.phase === "night" && role === "mafia" && game.me.alive;
 
