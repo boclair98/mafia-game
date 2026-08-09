@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.core.database import AsyncSessionLocal
+from app.game import rooms
 from app.routes.leaderboard import router as leaderboard_router
 from app.routes.users import router as users_router
 from app.routes.ws import router as ws_router
@@ -52,3 +53,16 @@ async def liveness() -> JSONResponse:
     Keep it dependency-free; adding a DB hit here would reintroduce false
     'warming' whenever the DB (not the pod) is the slow part."""
     return JSONResponse(content={"status": "ok"})
+
+
+@app.get("/api/status")
+async def public_status() -> JSONResponse:
+    """Dependency-free public presence numbers; never exposes room names."""
+    return JSONResponse(
+        content={
+            "status": "online",
+            "players": rooms.online,
+            "rooms": rooms.room_count,
+            "active_matches": rooms.active_matches,
+        }
+    )

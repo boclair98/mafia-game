@@ -8,7 +8,8 @@ Wires up:
 - a `signed_in` helper that stamps `X-Coders-User` on a request the
   way the platform gate would.
 
-Each test starts with truncated tables. The fixture connects to whatever
+Each database-backed API test starts with truncated tables. Pure game-flow
+and WebSocket tests do not boot PostgreSQL. The fixture connects to whatever
 Postgres `TEST_DATABASE_URL` points at — by default the same database
 the dev `docker compose up` brings up. If you'd rather isolate tests
 from your dev data, point TEST_DATABASE_URL at a separate DB before
@@ -45,16 +46,16 @@ async def _engine():
     await engine.dispose()
 
 
-@pytest_asyncio.fixture(autouse=True)
+@pytest_asyncio.fixture
 async def _truncate(_engine) -> AsyncIterator[None]:
-    """Wipe tables before every test so order doesn't matter."""
+    """Wipe tables for database-backed API tests only."""
     async with _engine.begin() as conn:
         await conn.execute(text("TRUNCATE TABLE scores, users RESTART IDENTITY CASCADE"))
     yield
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncIterator[AsyncClient]:
+async def client(_truncate) -> AsyncIterator[AsyncClient]:
     """ASGI client — no real network."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

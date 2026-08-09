@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import time
 import urllib.parse
 from uuid import UUID
 
@@ -61,13 +62,23 @@ async def game_socket(
     try:
         while True:
             try:
-                msg = json.loads(await ws.receive_text())
+                raw_message = await ws.receive_text()
+                if len(raw_message) > 4096:
+                    continue
+                msg = json.loads(raw_message)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 continue
             if not isinstance(msg, dict):
                 continue
+            command = msg.get("t")
+            now = time.monotonic()
+            if command != "ping" and now - player.last_command_at < 0.12:
+                continue
+            if command != "ping":
+                player.last_command_at = now
+            arena.touch()
             error: str | None = None
-            match msg.get("t"):
+            match command:
                 case "ready":
                     arena.toggle_ready(player.id)
                 case "pace":
@@ -78,6 +89,8 @@ async def game_socket(
                     except (TypeError, ValueError):
                         target = 6
                     error = arena.fill_bots(player.id, target)
+                case "remove_seat":
+                    error = arena.remove_lobby_seat(player.id, str(msg.get("target", "")))
                 case "start":
                     error = arena.start(player.id)
                 case "rematch":
@@ -86,6 +99,13 @@ async def game_socket(
                     error = arena.act(player.id, str(msg.get("target", "")))
                 case "vote":
                     error = arena.vote(player.id, str(msg.get("target", "")))
+                case "judge":
+                    if not isinstance(msg.get("execute"), bool):
+                        error = "잘못된 판결입니다."
+                    else:
+                        error = arena.judge(player.id, msg["execute"])
+                case "react":
+                    error = arena.add_reaction(player.id, str(msg.get("emoji", "")))
                 case "chat":
                     error = arena.add_chat(player.id, str(msg.get("text", "")))
                 case "ping":

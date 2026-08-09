@@ -1,0 +1,237 @@
+"""Focused tests for the server-authoritative trial and room controls."""
+
+from app.game import Player, Room, RoomManager
+
+
+def player(pid: str, role: str = "citizen", *, bot: bool = False) -> Player:
+    return Player(
+        id=pid,
+        key=f"key-{pid}-12345678",
+        nick=pid.upper(),
+        coders_id=None,
+        ws=None,
+        role=role,
+        ready=bot,
+        is_bot=bot,
+    )
+
+
+def room_with(*roles: str) -> Room:
+    room = Room("trial-test")
+    for index, role in enumerate(roles):
+        participant = player(f"p{index + 1}", role)
+        room.players[participant.id] = participant
+    room.host_id = "p1"
+    return room
+
+
+def test_unique_vote_opens_defense_without_immediate_execution():
+    room = room_with("mafia", "doctor", "detective", "citizen", "citizen")
+    room.phase = "vote"
+    room.votes = {"p1": "p5", "p2": "p5", "p3": "p1", "p4": "p5"}
+
+    room._resolve_vote()
+
+    assert room.phase == "defense"
+    assert room.accused_id == "p5"
+    assert room.players["p5"].alive is True
+    assert "최후 변론" in room.case_log[-1]
+
+
+def test_tied_vote_skips_trial_and_keeps_everyone_alive():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.phase = "vote"
+    room.votes = {"p1": "p3", "p2": "p3", "p3": "p1", "p4": "p1"}
+
+    room._resolve_vote()
+
+    assert room.phase == "result"
+    assert room.accused_id is None
+    assert all(participant.alive for participant in room.players.values())
+
+
+def test_only_accused_can_speak_during_final_defense():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.phase = "defense"
+    room.accused_id = "p4"
+
+    assert "피고인만" in room.add_chat("p2", "제가 말할게요")
+    assert room.add_chat("p4", "제 행동을 다시 확인해 주세요") is None
+    assert room.chat[-1]["from"] == "P4"
+
+
+def test_execute_majority_reveals_role_and_moves_to_result():
+    room = room_with("mafia", "doctor", "detective", "citizen", "citizen", "citizen")
+    room.phase = "verdict"
+    room.accused_id = "p6"
+    room.judgements = {"p1": True, "p2": True, "p3": True, "p4": False}
+
+    room._resolve_verdict()
+
+    assert room.players["p6"].alive is False
+    assert room.phase == "result"
+    assert "정체는 시민" in room.case_log[-1]
+
+
+def test_tie_in_final_judgement_spares_accused():
+    room = room_with("mafia", "doctor", "detective", "citizen", "citizen")
+    room.phase = "verdict"
+    room.accused_id = "p5"
+    room.judgements = {"p1": True, "p2": True, "p3": False, "p4": False}
+
+    room._resolve_verdict()
+
+    assert room.players["p5"].alive is True
+    assert room.phase == "result"
+    assert "석방" in room.case_log[-1]
+
+
+def test_executed_trickster_wins_immediately():
+    room = room_with("mafia", "doctor", "detective", "citizen", "trickster")
+    room.round = 1
+    room.phase = "verdict"
+    room.accused_id = "p5"
+    room.judgements = {"p1": True, "p2": True, "p3": True, "p4": False}
+
+    room._resolve_verdict()
+
+    assert room.phase == "gameover"
+    assert room.winner == "trickster"
+    assert room.players["p5"].score == 103
+
+
+def test_ready_gate_names_unprepared_human():
+    room = room_with("citizen", "citizen", "citizen", "citizen")
+    room.players["p2"].ready = True
+    room.players["p3"].ready = True
+
+    error = room.start("p1")
+
+    assert error is not None and "P4" in error
+    assert room.phase == "lobby"
+
+
+def test_bot_target_can_grow_and_shrink_room():
+    room = room_with("citizen")
+    room.fill_bots("p1", 8)
+    assert len(room.players) == 8
+    assert sum(participant.is_bot for participant in room.players.values()) == 7
+
+    room.fill_bots("p1", 4)
+    assert len(room.players) == 4
+    assert sum(participant.is_bot for participant in room.players.values()) == 3
+
+
+def test_bots_are_playable_seats_but_not_live_human_connections():
+    room = room_with("citizen")
+    room.fill_bots("p1", 4)
+    assert len(room.connected_players) == 1
+    assert len(room.lobby_seats) == 4
+    assert room.start("p1") is None
+    assert room.phase == "reveal"
+
+
+def test_reactions_are_phase_limited_whitelisted_and_rate_limited():
+    room = room_with("citizen", "citizen", "citizen", "citizen")
+    room.phase = "day"
+    assert room.add_reaction("p1", "🔥") is not None
+    assert room.add_reaction("p1", "👀") is None
+    assert room.add_reaction("p1", "👍") is None
+    assert len(room.reactions) == 1
+
+    room.phase = "night"
+    room.players["p2"].last_reaction_at = 0
+    assert room.add_reaction("p2", "👍") is not None
+
+
+def test_bot_vote_follows_its_public_suspicion_without_targeting_mafia_team():
+    room = room_with("mafia", "mafia", "doctor", "citizen", "citizen", "citizen", "citizen")
+    room.players["p1"].is_bot = True
+    room.players["p1"].connected = False
+    room._bot_suspicions["p1"] = "p5"
+    room.phase = "vote"
+
+    room._run_bots()
+
+    assert room.votes["p1"] == "p5"
+
+
+def test_decision_progress_requires_every_eligible_living_player():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.phase = "vote"
+    room.votes = {"p1": "p2", "p2": "p1", "p3": "p1"}
+    assert room._decision_progress() == (3, 4)
+    assert room._decisions_complete() is False
+    room.votes["p4"] = "p1"
+    assert room._decisions_complete() is True
+
+    room.phase = "verdict"
+    room.accused_id = "p4"
+    room.judgements = {"p1": True, "p2": False, "p3": True}
+    assert room._decision_progress() == (3, 3)
+    assert room._decisions_complete() is True
+
+
+def test_complete_match_keeps_secrets_private_and_reaches_citizen_win():
+    room = room_with("mafia", "doctor", "detective", "citizen", "citizen")
+    room.round = 1
+    room.phase = "night"
+    assert room.add_chat("p1", "P5를 습격합니다") is None
+    room.actions = {"p1": "p5", "p2": "p2", "p3": "p1"}
+
+    room._resolve_night()
+    assert room.players["p5"].alive is False
+    assert room.phase == "dawn"
+    assert "마피아입니다" in room.players["p3"].intel[-1]
+    assert room._state_for(room.players["p1"])["chat"][-1]["text"] == "P5를 습격합니다"
+    assert room._state_for(room.players["p2"])["chat"] == []
+    assert room._state_for(room.players["p2"])["me"]["intel"] == []
+
+    room._advance()  # dawn -> day
+    room._advance()  # day -> vote
+    room.votes = {"p1": "p2", "p2": "p1", "p3": "p1", "p4": "p1"}
+    room._advance()  # vote -> defense
+    assert room.accused_id == "p1"
+    room._advance()  # defense -> verdict
+    room.judgements = {"p2": True, "p3": True, "p4": True}
+    room._advance()  # verdict -> gameover
+
+    assert room.phase == "gameover"
+    assert room.winner == "citizen"
+    assert room.players["p1"].alive is False
+    assert all(item["role"] for item in room._state_for(room.players["p2"])["players"])
+
+
+def test_rematch_erases_previous_public_and_mafia_chat():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.phase = "gameover"
+    room.chat.extend([
+        {"id": "a", "from": "P1", "text": "secret", "visibility": "mafia", "at": 1},
+        {"id": "b", "from": "P2", "text": "public", "visibility": "all", "at": 2},
+    ])
+
+    assert room.rematch("p1") is None
+    assert room.phase == "lobby"
+    assert list(room.chat) == []
+
+
+def test_public_presence_counts_humans_without_exposing_bot_seats():
+    manager = RoomManager()
+    room = manager.get("presence")
+    room.players["human"] = player("human")
+    room.players["bot"] = player("bot", bot=True)
+    room.players["bot"].connected = False
+    assert manager.online == 1
+    assert manager.room_count == 1
+    assert manager.active_matches == 0
+    room.phase = "night"
+    assert manager.active_matches == 1
+
+
+def test_only_host_can_remove_another_lobby_seat():
+    room = room_with("citizen", "citizen", "citizen", "citizen")
+    assert room.remove_lobby_seat("p2", "p3") is not None
+    assert room.remove_lobby_seat("p1", "p1") is not None
+    assert room.remove_lobby_seat("p1", "p4") is None
+    assert "p4" not in room.players
+    assert "방장" in room.case_log[-1]

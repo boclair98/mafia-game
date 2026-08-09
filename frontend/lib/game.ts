@@ -1,5 +1,5 @@
 export type Role = "mafia" | "doctor" | "detective" | "bodyguard" | "trickster" | "citizen" | "spectator";
-export type Phase = "lobby" | "reveal" | "night" | "dawn" | "day" | "vote" | "result" | "gameover";
+export type Phase = "lobby" | "reveal" | "night" | "dawn" | "day" | "vote" | "defense" | "verdict" | "result" | "gameover";
 
 export type PlayerState = {
   id: string;
@@ -11,9 +11,11 @@ export type PlayerState = {
   mafia: boolean;
   role: Role | null;
   bot: boolean;
+  score: number;
 };
 
 export type ChatMessage = { id: string; from: string; text: string; at: number };
+export type ReactionState = { id: string; from: string; emoji: string; at: number };
 
 export type GameState = {
   t: "state";
@@ -33,12 +35,18 @@ export type GameState = {
     alive: boolean;
     action_target: string | null;
     vote_target: string | null;
+    judgement?: boolean | null;
     intel: string[];
     mission: string;
   };
   story: string[];
+  case_log: string[];
+  accused_id: string | null;
+  judgement_counts: { execute: number; spare: number };
+  decision_progress: { completed: number; total: number };
   guide: string;
   chat: ChatMessage[];
+  reactions: ReactionState[];
 };
 
 export type WelcomeMsg = {

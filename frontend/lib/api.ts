@@ -18,10 +18,25 @@ export type LeaderboardEntry = {
   updated_at: string;
 };
 
+export type GameStatus = {
+  status: "online";
+  players: number;
+  rooms: number;
+  active_matches: number;
+};
+
 export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
   return tracked(async () => {
     const r = await fetch("/api/leaderboard", { credentials: "include" });
     if (!r.ok) return [];
+    return r.json();
+  });
+}
+
+export async function fetchGameStatus(): Promise<GameStatus | null> {
+  return tracked(async () => {
+    const r = await fetch("/api/status", { credentials: "include" });
+    if (!r.ok) return null;
     return r.json();
   });
 }

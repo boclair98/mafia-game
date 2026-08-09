@@ -1,5 +1,5 @@
-const CACHE = "black-midnight-v2";
-const SHELL = ["/", "/manifest.webmanifest", "/icon.svg"];
+const CACHE = "black-midnight-v3";
+const SHELL = ["/", "/manifest.webmanifest", "/icon.svg", "/midnight-city-ui.webp", "/suspect-atlas.webp"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
