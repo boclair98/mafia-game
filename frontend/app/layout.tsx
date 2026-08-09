@@ -1,42 +1,30 @@
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { Inter, JetBrains_Mono } from "next/font/google";
 
-import { DevDeployBadge } from "@/components/DevDeployBadge";
 import { WarmingBar } from "@/components/WarmingBanner";
-
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
-});
-
-const mono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-jetbrains-mono",
-  display: "swap",
-});
-
-export const metadata = {
-  title: "template-coders-game",
-  description: "A realtime multiplayer game starter for coders.kr.",
+export const metadata: Metadata = {
+  title: "검은 자정 | 실시간 마피아 게임",
+  description: "친구들과 링크 하나로 시작하는 시네마틱 실시간 마피아 게임",
+  manifest: "/manifest.webmanifest",
+  icons: { icon: "/icon.svg", apple: "/icon.svg" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "검은 자정" },
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  // Fullscreen game chrome: the canvas owns the viewport, so no page
-  // scroll, no container, no header — the HUD overlays everything it
-  // needs. WarmingBar still floats on top for backend cold starts.
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover" as const,
+  themeColor: "#080a0d",
+};
+
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
-      <body className="h-dvh overflow-hidden bg-[#0b0f1a]">
+    <html lang="ko">
+      <body>
         <WarmingBar />
-        <DevDeployBadge />
-        <main className="h-full w-full">{children}</main>
+        {children}
       </body>
     </html>
   );

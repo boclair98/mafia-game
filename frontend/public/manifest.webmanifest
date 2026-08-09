@@ -1,0 +1,17 @@
+{
+  "name": "검은 자정: 실시간 마피아",
+  "short_name": "검은 자정",
+  "description": "친구들과 링크 하나로 즐기는 실시간 소셜 추리 게임",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "portrait-primary",
+  "background_color": "#080a0d",
+  "theme_color": "#080a0d",
+  "categories": ["games", "entertainment", "social"],
+  "lang": "ko-KR",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

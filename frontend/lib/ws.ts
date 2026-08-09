@@ -22,15 +22,16 @@ const PING_INTERVAL_MS = 20_000;
 const BACKOFF_BASE_MS = 500;
 const BACKOFF_CAP_MS = 8_000;
 
-export function gameSocketUrl(room: string): string {
+export function gameSocketUrl(room: string, nick: string, key: string): string {
+  const query = `room=${encodeURIComponent(room)}&nick=${encodeURIComponent(nick)}&key=${encodeURIComponent(key)}`;
   // `next dev` can't proxy WebSockets (PLATFORM.md), so in local dev we
   // hit the backend's published port directly. In production nginx
   // proxies /api/ws on this same origin with Upgrade headers.
   if (process.env.NODE_ENV === "development") {
-    return `ws://${location.hostname}:8000/api/ws?room=${encodeURIComponent(room)}`;
+    return `ws://${location.hostname}:8000/api/ws?${query}`;
   }
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${location.host}/api/ws?room=${encodeURIComponent(room)}`;
+  return `${proto}://${location.host}/api/ws?${query}`;
 }
 
 type Handlers = {

@@ -16,8 +16,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="template-coders-game API",
-    version="0.1.0",
+    title="Black Midnight Mafia API",
+    version="1.0.0",
     lifespan=lifespan,
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",

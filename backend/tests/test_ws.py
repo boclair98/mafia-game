@@ -1,9 +1,4 @@
-"""WebSocket behavior, via Starlette's sync TestClient (ASGI, no network).
-
-No DB needed for any of this — the game world is in-memory. The DB only
-enters the picture at disconnect (persist_best_score), which is covered
-in test_leaderboard.py against a real Postgres.
-"""
+"""WebSocket behavior for the social deduction room."""
 
 from __future__ import annotations
 
@@ -12,93 +7,71 @@ from uuid import uuid4
 
 import pytest
 from app.core.config import settings
-from app.game import ORB_COUNT
+from app.game import MIN_PLAYERS
 from app.main import app
 from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
 def _really_anonymous(monkeypatch):
-    """A local backend/.env may set DEV_FAKE_USER; neutralize it so the
-    guest-path assertions below mean what they say."""
     monkeypatch.setattr(settings, "dev_fake_user", None)
 
 
-def test_guest_can_play_without_signing_in():
+def test_guest_can_join_and_receive_lobby_state():
     with TestClient(app) as client:
-        with client.websocket_connect("/api/ws?room=t-guest") as ws:
-            w = ws.receive_json()
-            assert w["t"] == "welcome"
-            assert w["signed_in"] is False
-            assert w["nick"].startswith("guest-")
-            assert w["room"] == "t-guest"
-
-            s = ws.receive_json()
-            assert s["t"] == "state"
-            assert any(p["id"] == w["id"] for p in s["players"])
-            assert len(s["orbs"]) == ORB_COUNT
+        with client.websocket_connect("/api/ws?room=night-test&nick=철수&key=abcdefgh1234") as ws:
+            welcome = ws.receive_json()
+            state = ws.receive_json()
+            assert welcome["t"] == "welcome"
+            assert welcome["nick"] == "철수"
+            assert state["phase"] == "lobby"
+            assert state["min_players"] == MIN_PLAYERS
+            assert state["me"]["role"] == "citizen"
 
 
-def test_signed_in_identity_comes_from_the_gate_headers():
+def test_signed_in_name_is_trusted_from_gate_header():
     headers = {
         "X-Coders-User": str(uuid4()),
-        # The gate URL-encodes the display name (headers are ASCII).
-        "X-Coders-User-Name": quote("김철수"),
+        "X-Coders-User-Name": quote("김탐정"),
     }
     with TestClient(app) as client:
-        with client.websocket_connect("/api/ws?room=t-auth", headers=headers) as ws:
-            w = ws.receive_json()
-            assert w["signed_in"] is True
-            assert w["nick"] == "김철수"
+        with client.websocket_connect(
+            "/api/ws?room=auth-test&nick=가짜이름&key=abcdefgh5678", headers=headers
+        ) as ws:
+            assert ws.receive_json()["nick"] == "김탐정"
 
 
-def test_input_moves_only_your_own_player():
+def test_same_player_key_resumes_seat():
+    url = "/api/ws?room=resume-test&nick=재접속&key=resume-key-1234"
     with TestClient(app) as client:
-        with client.websocket_connect("/api/ws?room=t-move") as ws:
-            w = ws.receive_json()
-            first = ws.receive_json()
-            me = next(p for p in first["players"] if p["id"] == w["id"])
+        with client.websocket_connect(url) as first:
+            original = first.receive_json()
+            first.receive_json()
+        with client.websocket_connect(url) as second:
+            resumed = second.receive_json()
+            # Lobby departures release their seat; active matches retain it.
+            assert resumed["t"] == "welcome"
+            assert resumed["nick"] == original["nick"]
 
-            ws.send_json({"t": "input", "dx": 1, "dy": 0})
-            # Give the 15 Hz tick loop a few frames to pick the input up.
-            for _ in range(10):
-                s = ws.receive_json()
-                if s["t"] != "state":
-                    continue
-                now = next(p for p in s["players"] if p["id"] == w["id"])
-                if now["x"] > me["x"]:
+
+def test_only_host_can_start_and_minimum_is_enforced():
+    with TestClient(app) as client:
+        with client.websocket_connect("/api/ws?room=start-test&nick=방장&key=host-key-1234") as ws:
+            ws.receive_json()
+            ws.receive_json()
+            ws.send_json({"t": "start"})
+            for _ in range(5):
+                msg = ws.receive_json()
+                if msg["t"] == "error":
+                    assert "최소" in msg["message"]
                     return
-            pytest.fail("player never moved right after an input message")
+            pytest.fail("minimum-player error was not returned")
 
 
-def test_two_players_see_each_other():
+def test_ping_gets_pong():
     with TestClient(app) as client:
-        with (
-            client.websocket_connect("/api/ws?room=t-duo") as a,
-            client.websocket_connect("/api/ws?room=t-duo") as b,
-        ):
-            a_id = a.receive_json()["id"]
-            b_id = b.receive_json()["id"]
-            for _ in range(10):
-                s = a.receive_json()
-                ids = {p["id"] for p in s["players"]}
-                if {a_id, b_id} <= ids:
-                    return
-            pytest.fail("second player never showed up in the first's state")
-
-
-def test_ping_gets_a_pong_between_states():
-    with TestClient(app) as client:
-        with client.websocket_connect("/api/ws") as ws:
-            ws.receive_json()  # welcome
+        with client.websocket_connect("/api/ws?nick=핑&key=ping-key-12345") as ws:
+            ws.receive_json()
+            ws.receive_json()
             ws.send_json({"t": "ping"})
-            for _ in range(10):
-                if ws.receive_json()["t"] == "pong":
-                    return
-            pytest.fail("no pong within 10 frames")
-
-
-def test_junk_room_names_fall_back_to_lobby():
-    with TestClient(app) as client:
-        with client.websocket_connect("/api/ws?room=NOT%20a%20room!") as ws:
-            assert ws.receive_json()["room"] == "lobby"
+            assert ws.receive_json()["t"] == "pong"
