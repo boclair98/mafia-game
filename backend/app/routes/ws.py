@@ -63,7 +63,7 @@ async def game_socket(
         while True:
             try:
                 raw_message = await ws.receive_text()
-                if len(raw_message) > 4096:
+                if len(raw_message) > 8192:
                     continue
                 msg = json.loads(raw_message)
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -72,9 +72,9 @@ async def game_socket(
                 continue
             command = msg.get("t")
             now = time.monotonic()
-            if command != "ping" and now - player.last_command_at < 0.12:
+            if command not in {"ping", "voice_signal"} and now - player.last_command_at < 0.12:
                 continue
-            if command != "ping":
+            if command not in {"ping", "voice_signal"}:
                 player.last_command_at = now
             arena.touch()
             error: str | None = None
@@ -108,6 +108,22 @@ async def game_socket(
                     error = arena.add_reaction(player.id, str(msg.get("emoji", "")))
                 case "chat":
                     error = arena.add_chat(player.id, str(msg.get("text", "")))
+                case "voice_presence":
+                    if not isinstance(msg.get("enabled"), bool):
+                        error = "잘못된 음성 채팅 상태입니다."
+                    else:
+                        error = arena.set_voice_presence(player.id, msg["enabled"])
+                case "voice_signal":
+                    error = await arena.relay_voice(
+                        player.id,
+                        str(msg.get("target", "")),
+                        msg.get("data"),
+                    )
+                    if error:
+                        await ws.send_text(json.dumps(
+                            {"t": "error", "message": error}, ensure_ascii=False
+                        ))
+                    continue
                 case "ping":
                     await ws.send_text('{"t":"pong"}')
                     continue

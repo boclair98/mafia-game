@@ -2,7 +2,7 @@
 
 import {
   Activity, Bot, BookOpen, Check, ChevronLeft, ChevronRight, Clipboard, Crosshair, Download, Eye, Film, Gavel,
-  HeartPulse, LockKeyhole, LogIn, MessageCircle, Moon, Radio, RotateCcw, Search, Send, Siren,
+  Headphones, HeartPulse, LockKeyhole, LogIn, MessageCircle, Mic, MicOff, Moon, PhoneOff, Radio, RotateCcw, Search, Send, Siren,
   Share2, ShieldCheck, ShieldQuestion, Skull, Smartphone, Sparkles,
   TimerReset, Trophy, UserPlus, Users, Volume2, VolumeX, Vote, X,
 } from "lucide-react";
@@ -11,6 +11,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { GameState, PlayerState, Role, WelcomeMsg } from "@/lib/game";
 import { fetchGameStatus, fetchLeaderboard, type GameStatus, type LeaderboardEntry } from "@/lib/api";
 import { signInHref, useMe } from "@/lib/identity";
+import { VoiceRoom, type VoiceSignal } from "@/lib/voice";
 import { type ConnStatus, GameSocket, gameSocketUrl } from "@/lib/ws";
 
 const ROLE_META: Record<Role, { name: string; icon: typeof Skull; copy: string; color: string; goal: string; power: string; cover: string }> = {
@@ -57,17 +58,25 @@ const PHASE_ALERT_META: Record<GameState["phase"], { kicker: string; title: stri
 };
 
 const PHASE_NARRATION: Record<GameState["phase"], string> = {
-  lobby: "용의자 대기실입니다. 참가자가 모두 준비되면 사건을 시작하십시오.",
-  reveal: "배역이 공개되었습니다. 자신의 정체를 숨기고, 첫 번째 밤을 준비하십시오.",
-  night: "밤이 되었습니다. 모두 눈을 감고, 역할이 있는 사람만 조용히 행동하십시오.",
-  dawn: "새벽이 밝았습니다. 밤사이 발생한 사건 보고를 확인합니다.",
-  day: "토론을 시작합니다. 발언 속 거짓말과 모순을 찾아내십시오.",
-  vote: "시민 투표를 시작합니다. 처형할 용의자 한 명을 선택하십시오.",
-  defense: "최후 변론을 시작합니다. 지목된 피고만 발언할 수 있습니다.",
-  verdict: "최종 판결을 시작합니다. 변론을 토대로 처형 또는 석방을 결정하십시오.",
-  result: "투표를 마감합니다. 도시의 판결을 공개합니다.",
-  gameover: "사건이 종료되었습니다. 승리 팀과 최종 사건 기록을 확인하십시오.",
+  lobby: "용의자 대기실입니다.",
+  reveal: "배역이 공개되었습니다. 자신의 정체를 확인하세요.",
+  night: "밤이 되었습니다. 모두 눈을 감으세요.",
+  dawn: "새벽 사건 보고입니다.",
+  day: "토론을 시작합니다.",
+  vote: "시민 투표를 시작합니다.",
+  defense: "최후 변론을 시작합니다.",
+  verdict: "처형 또는 석방을 결정하세요.",
+  result: "도시의 판결을 공개합니다.",
+  gameover: "사건이 종료되었습니다.",
 };
+
+function phaseNarration(game: GameState, phase: GameState["phase"]) {
+  const latest = game.story.at(-1);
+  const accused = game.players.find((player) => player.id === game.accused_id);
+  if ((phase === "dawn" || phase === "result" || phase === "gameover") && latest) return latest;
+  if (phase === "defense" && accused) return `${accused.n}님의 최후 변론을 시작합니다.`;
+  return PHASE_NARRATION[phase];
+}
 
 const PHASE_TRACK: GameState["phase"][] = ["reveal", "night", "dawn", "day", "vote", "defense", "verdict", "result"];
 const PHASE_THREAT: Record<GameState["phase"], number> = { lobby: 8, reveal: 24, night: 72, dawn: 58, day: 42, vote: 82, defense: 88, verdict: 96, result: 94, gameover: 100 };
@@ -128,6 +137,8 @@ export default function GamePage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [networkStatus, setNetworkStatus] = useState<GameStatus | null>(null);
   const [voiceOn, setVoiceOn] = useState(false);
+  const [voiceChatOn, setVoiceChatOn] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
   const [soundOn, setSoundOn] = useState(false);
   const [evidence, setEvidence] = useState<Record<string, -1 | 0 | 1>>({});
   const [phaseAlert, setPhaseAlert] = useState<GameState["phase"] | null>(null);
@@ -136,9 +147,17 @@ export default function GamePage() {
   const phaseAlertTimer = useRef<number | null>(null);
   const decisionFlashTimer = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const voiceRoomRef = useRef<VoiceRoom | null>(null);
   const lastCountdownBeep = useRef<number | null>(null);
   const soundPhase = game?.phase;
   const countdownRemaining = game ? secondsLeft(game.deadline, now) : 0;
+  const narrationText = game && soundPhase ? phaseNarration(game, soundPhase) : "";
+  const voiceCanSpeak = Boolean(game?.me.alive && (
+    ["lobby", "day", "vote", "gameover"].includes(game.phase)
+    || (game.phase === "defense" && game.me.id === game.accused_id)
+  ));
+  const voicePeerKey = game?.players.filter((player) => player.voice && !player.bot && player.id !== game.me.id).map((player) => player.id).sort().join("|") ?? "";
+  const myVoicePresent = game?.players.find((player) => player.id === game.me.id)?.voice ?? false;
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -244,6 +263,8 @@ export default function GamePage() {
     if (phaseAlertTimer.current) window.clearTimeout(phaseAlertTimer.current);
     if (decisionFlashTimer.current) window.clearTimeout(decisionFlashTimer.current);
     if (audioContextRef.current) void audioContextRef.current.close();
+    voiceRoomRef.current?.stop();
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   }, []);
 
   useEffect(() => {
@@ -301,9 +322,8 @@ export default function GamePage() {
   }, [tutorialOpen]);
 
   useEffect(() => {
-    if (!voiceOn || !soundPhase || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const line = new SpeechSynthesisUtterance(PHASE_NARRATION[soundPhase]);
+    if (!voiceOn || !soundPhase || !narrationText || !("speechSynthesis" in window)) return;
+    const line = new SpeechSynthesisUtterance(narrationText);
     const voices = window.speechSynthesis.getVoices();
     const koreanVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith("ko"));
     line.voice = koreanVoices.find((voice) => /(injoon|hyunsu|male|남성|natural|neural)/i.test(voice.name))
@@ -311,12 +331,11 @@ export default function GamePage() {
       ?? koreanVoices[0]
       ?? null;
     line.lang = "ko-KR";
-    line.rate = 0.82;
+    line.rate = 0.9;
     line.pitch = 0.72;
     line.volume = 0.92;
     window.speechSynthesis.speak(line);
-    return () => window.speechSynthesis.cancel();
-  }, [soundPhase, voiceOn]);
+  }, [narrationText, soundPhase, voiceOn]);
 
   useEffect(() => {
     if (!joined || !room || !nick) return;
@@ -324,14 +343,14 @@ export default function GamePage() {
     const socket = new GameSocket(gameSocketUrl(room, nick, key), {
       onStatus: setStatus,
       onMessage: (raw) => {
-        const msg = raw as WelcomeMsg | GameState | { t: "error"; message: string };
+        const msg = raw as WelcomeMsg | GameState | { t: "error"; message: string } | { t: "voice_signal"; from: string; data: VoiceSignal };
         if (msg.t === "welcome") {
           setWelcome(msg as WelcomeMsg);
         } else if (msg.t === "state") {
           const next = msg as GameState;
           setGame({
             ...next,
-            players: next.players.map((player) => ({ ...player, score: player.score ?? 0 })),
+            players: next.players.map((player) => ({ ...player, score: player.score ?? 0, voice: player.voice ?? false })),
             accused_id: next.accused_id ?? null,
             judgement_counts: next.judgement_counts ?? { execute: 0, spare: 0 },
             decision_progress: next.decision_progress ?? { completed: 0, total: 0 },
@@ -342,12 +361,25 @@ export default function GamePage() {
         } else if (msg.t === "error") {
           setNotice(msg.message);
           window.setTimeout(() => setNotice(""), 3200);
+        } else if (msg.t === "voice_signal") {
+          void voiceRoomRef.current?.handleSignal(msg.from, msg.data);
         }
       },
     });
     socketRef.current = socket;
     return () => socket.close();
   }, [joined, room, nick]);
+
+  useEffect(() => {
+    if (!voiceChatOn) return;
+    void voiceRoomRef.current?.syncPeers(voicePeerKey ? voicePeerKey.split("|") : []);
+    if (!myVoicePresent) socketRef.current?.send({ t: "voice_presence", enabled: true });
+  }, [myVoicePresent, voiceChatOn, voicePeerKey]);
+
+  useEffect(() => {
+    if (!voiceChatOn) return;
+    voiceRoomRef.current?.setMicEnabled(voiceCanSpeak && !micMuted);
+  }, [micMuted, voiceCanSpeak, voiceChatOn]);
 
   const submitJoin = (event: FormEvent) => {
     event.preventDefault();
@@ -387,6 +419,7 @@ export default function GamePage() {
     || game?.phase === "defense" && isAccused && game.me.alive
     || game?.phase === "night" && role === "mafia" && game.me.alive);
   const canReact = Boolean(game && ["day", "vote", "defense", "verdict", "gameover"].includes(game.phase));
+  const voiceCount = game?.players.filter((player) => player.voice).length ?? 0;
 
   const targetPlayers = useMemo(() => {
     if (!game) return [];
@@ -524,6 +557,39 @@ export default function GamePage() {
     if (!next && "speechSynthesis" in window) window.speechSynthesis.cancel();
   };
 
+  const toggleVoiceChat = async () => {
+    if (voiceChatOn) {
+      send({ t: "voice_presence", enabled: false });
+      voiceRoomRef.current?.stop();
+      voiceRoomRef.current = null;
+      setVoiceChatOn(false);
+      setMicMuted(false);
+      return;
+    }
+    if (!welcome) return;
+    const room = new VoiceRoom(
+      welcome.id,
+      (target, data) => send({ t: "voice_signal", target, data }),
+      (message) => {
+        setNotice(message);
+        window.setTimeout(() => setNotice(""), 3600);
+      },
+    );
+    try {
+      await room.start();
+      voiceRoomRef.current = room;
+      setVoiceChatOn(true);
+      setMicMuted(false);
+      send({ t: "voice_presence", enabled: true });
+    } catch (error) {
+      room.stop();
+      setNotice(error instanceof Error && error.message.includes("지원")
+        ? error.message
+        : "마이크 권한을 허용해야 음성 채팅에 참여할 수 있습니다.");
+      window.setTimeout(() => setNotice(""), 4200);
+    }
+  };
+
   const toggleSound = () => {
     const next = !soundOn;
     setSoundOn(next);
@@ -637,7 +703,7 @@ export default function GamePage() {
             <div className="phase-alert-icon"><PhaseAlertIcon size={30} /></div>
             <h2>{alertMeta.title}</h2>
             <p>{alertMeta.copy}</p>
-            {voiceOn && <div className="phase-alert-voice"><Volume2 size={13} /><span>{PHASE_NARRATION[phaseAlert]}</span></div>}
+            {voiceOn && <div className="phase-alert-voice"><Volume2 size={13} /><span>{phaseNarration(game, phaseAlert)}</span></div>}
             {remaining > 0 && <div className="phase-alert-countdown"><b>{remaining}</b><span>초 남음</span></div>}
             <div className="phase-alert-line"><i /></div>
           </div>
@@ -696,7 +762,7 @@ export default function GamePage() {
             {game.phase === "lobby" && (
               <>
                 <div><b>{game.players.length}/{game.max_players}명 등록 · 사람 준비 {readyHumans}/{humanCount} · {game.pace === "quick" ? "퀵 8분" : "클래식 15분"}</b><span>{unreadyPlayers.length ? `${unreadyPlayers.map((player) => player.n).slice(0, 3).join(", ")}님의 준비를 기다리는 중입니다.` : "역할 배정 준비가 끝났습니다."}</span></div>
-                {game.host === game.me.id && <div className="pace-switch"><button className={game.pace === "quick" ? "active" : ""} onClick={() => send({ t: "pace", pace: "quick" })}><TimerReset size={14} />퀵</button><button className={game.pace === "classic" ? "active" : ""} onClick={() => send({ t: "pace", pace: "classic" })}>클래식</button></div>}
+                {game.host === game.me.id && <div className="pace-switch"><button className={game.pace === "quick" ? "active" : ""} onClick={() => send({ t: "pace", pace: "quick" })}><TimerReset size={14} />퀵 · 약 12분</button><button className={game.pace === "classic" ? "active" : ""} onClick={() => send({ t: "pace", pace: "classic" })}>클래식 · 20분+</button></div>}
                 {game.host === game.me.id && <div className="bot-fill-switch"><Bot size={14} /><span>AI 인원</span>{[4, 6, 8].map((target) => <button key={target} className={game.players.length === target ? "active" : ""} onClick={() => send({ t: "fill_bots", target })}>{target}</button>)}</div>}
                 <button className="secondary-button" onClick={() => setInviteOpen(true)}><UserPlus size={17} />친구 초대</button>
                 {game.host !== game.me.id && <button className="secondary-button" onClick={() => send({ t: "ready" })}>{me?.ready ? <Check size={17} /> : <ShieldQuestion size={17} />}{me?.ready ? "준비 취소" : "준비하기"}</button>}
@@ -720,6 +786,13 @@ export default function GamePage() {
         <aside className="comms-panel">
           <div className="story-card"><div className="story-card-head"><div className="panel-label">LIVE INCIDENT FEED</div><button onClick={() => setCaseOpen(true)}><BookOpen size={13} />전체 기록</button></div><div className="ai-director"><div><Radio size={14} /><b>자정 관제실 · 실시간 지령</b><i /></div><p>{game.guide}</p></div><div className="story-list">{game.story.slice(-5).map((line, i) => <div key={`${line}-${i}`} className={i === Math.min(4, game.story.length - 1) ? "latest" : ""}><span>{String(Math.max(0, game.story.length - 5) + i + 1).padStart(2, "0")}</span><p>{line}</p></div>)}</div>{game.phase === "gameover" && <div className="case-file"><b>사건 파일 · 최종 배역</b><div>{game.players.filter((p) => p.role).map((p) => <span key={p.id}>{p.n} — {p.role ? ROLE_META[p.role].name : "?"} · {p.score}점</span>)}</div></div>}</div>
           <div className="chat-card">
+            <div className={`voice-chat-bar ${voiceChatOn ? "connected" : ""}`}>
+              <div><Headphones size={16} /><span><b>실시간 음성 테이블</b><small>{voiceChatOn ? `${voiceCount}명 연결 · ${voiceCanSpeak ? "발언 가능" : "현재 단계 자동 음소거"}` : "마이크 권한을 허용한 참가자끼리 대화"}</small></span></div>
+              <div className="voice-chat-actions">
+                {voiceChatOn && <button onClick={() => setMicMuted((muted) => !muted)} disabled={!voiceCanSpeak} aria-label={micMuted ? "마이크 켜기" : "마이크 끄기"}>{micMuted || !voiceCanSpeak ? <MicOff size={15} /> : <Mic size={15} />}</button>}
+                <button className={voiceChatOn ? "leave" : "join"} onClick={() => void toggleVoiceChat()}>{voiceChatOn ? <><PhoneOff size={14} />나가기</> : <><Mic size={14} />음성 참여</>}</button>
+              </div>
+            </div>
             <div className="chat-title"><div><MessageCircle size={16} /><b>{game.phase === "night" && role === "mafia" ? "마피아 비밀 채팅" : "테이블 대화"}</b></div><span>{canChat ? "대화 가능" : "침묵 중"}</span></div>
             <div className="chat-scroll">{game.chat.length === 0 && <div className="empty-chat">아직 대화가 없습니다.</div>}{game.chat.map((msg) => <div className="chat-message" key={msg.id}><b>{msg.from}</b><p>{msg.text}</p></div>)}<div ref={chatEndRef} /></div>
             {canReact && <div className="reaction-dock" aria-label="빠른 리액션">{REACTION_EMOJIS.map((emoji) => <button key={emoji} onClick={() => send({ t: "react", emoji })} aria-label={`${emoji} 리액션 보내기`}>{emoji}</button>)}</div>}
@@ -810,7 +883,7 @@ function PlayerCard({ player, index, self, host, accused, selected, selectable, 
   return (
     <button type="button" className={`player-card ${!player.alive ? "dead" : ""} ${accused ? "accused" : ""} ${selected ? "selected" : ""} ${selectable ? "selectable" : ""}`} onClick={selectable ? onSelect : undefined} disabled={!selectable}>
       <div className="portrait"><span>{String(index + 1).padStart(2, "0")}</span><b className={`avatar-photo avatar-${index % 12}`} aria-label={`${player.n} 가상 인물 사진`} />{player.connected && <i />}{mark !== 0 && <em className={`intel-mark ${mark === -1 ? "suspect" : "safe"}`}>{mark === -1 ? "의심" : "안전"}</em>}</div>
-      <div className="player-info"><div><strong>{player.n}</strong>{self && <small>나</small>}{host && <small>방장</small>}{player.bot && <small>AI</small>}{player.mafia && <Skull size={13} />}{player.id && phase === "gameover" && player.role && <small>{ROLE_META[player.role].name}</small>}</div><span>{!player.alive ? "사망" : phase === "lobby" ? host ? "시작 권한 보유" : player.ready ? "준비 완료" : "대기 중" : "생존"}</span></div>
+      <div className="player-info"><div><strong>{player.n}</strong>{self && <small>나</small>}{host && <small>방장</small>}{player.bot && <small>AI</small>}{player.voice && <Mic className="voice-presence-icon" size={12} />}{player.mafia && <Skull size={13} />}{player.id && phase === "gameover" && player.role && <small>{ROLE_META[player.role].name}</small>}</div><span>{!player.alive ? "사망" : phase === "lobby" ? host ? "시작 권한 보유" : player.ready ? "준비 완료" : "대기 중" : "생존"}</span></div>
       {player.votes > 0 && <div className="vote-count">{player.votes}표</div>}
       {accused && <div className="accused-mark"><Gavel size={12} />피고</div>}
       {selected && <div className="selected-mark"><Check size={14} /></div>}

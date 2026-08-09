@@ -26,8 +26,12 @@ else:
 MIN_PLAYERS = 4
 MAX_PLAYERS = 12
 PACE_SECONDS = {
-    "quick": {"reveal": 7, "night": 24, "dawn": 6, "day": 42, "vote": 24, "defense": 18, "verdict": 15, "result": 6},
-    "classic": {"reveal": 9, "night": 35, "dawn": 8, "day": 75, "vote": 35, "defense": 30, "verdict": 24, "result": 8},
+    "quick": {"reveal": 12, "night": 45, "dawn": 10, "day": 90, "vote": 40, "defense": 35, "verdict": 30, "result": 10},
+    "classic": {"reveal": 15, "night": 60, "dawn": 12, "day": 150, "vote": 60, "defense": 60, "verdict": 45, "result": 12},
+}
+EARLY_ADVANCE_MINIMUM = {
+    "quick": {"night": 20, "vote": 18, "verdict": 15},
+    "classic": {"night": 30, "vote": 25, "verdict": 20},
 }
 
 _ROOM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
@@ -109,6 +113,7 @@ class Player:
     last_chat_at: float = 0.0
     last_reaction_at: float = 0.0
     last_command_at: float = 0.0
+    voice: bool = False
 
 
 class Room:
@@ -212,6 +217,7 @@ class Room:
         player = self.players.get(pid)
         if not player:
             return
+        player.voice = False
         if self.phase == "lobby":
             self.players.pop(pid, None)
             self._record(f"{player.nick}님이 자리를 떠났습니다.")
@@ -236,6 +242,32 @@ class Room:
         if pace not in PACE_SECONDS:
             return "지원하지 않는 게임 속도입니다."
         self.pace = pace
+        return None
+
+    def set_voice_presence(self, pid: str, enabled: bool) -> str | None:
+        player = self.players.get(pid)
+        if not player or player.is_bot:
+            return "음성 채팅에 참여할 수 없는 좌석입니다."
+        player.voice = enabled and player.connected
+        return None
+
+    async def relay_voice(self, pid: str, target_id: str, data: object) -> str | None:
+        sender = self.players.get(pid)
+        target = self.players.get(target_id)
+        if not sender or not sender.voice:
+            return "먼저 음성 채팅에 참여해 주세요."
+        if not target or target.is_bot or not target.connected or not target.voice or not target.ws:
+            return "상대방이 음성 채팅에 연결되어 있지 않습니다."
+        if not isinstance(data, dict):
+            return "잘못된 음성 연결 정보입니다."
+        encoded = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        if len(encoded) > 8192:
+            return "음성 연결 정보가 너무 큽니다."
+        await target.ws.send_text(json.dumps(
+            {"t": "voice_signal", "from": pid, "data": data},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ))
         return None
 
     def fill_bots(self, pid: str, target: int = 6) -> str | None:
@@ -436,10 +468,11 @@ class Room:
                 break
             self._run_bots()
             elapsed = time.time() - self.phase_started_at
+            minimum = EARLY_ADVANCE_MINIMUM[self.pace].get(self.phase, 0)
             early_ready = (
-                (self.phase == "vote" and elapsed >= 5 and self._decisions_complete())
-                or (self.phase == "verdict" and elapsed >= 4 and self._decisions_complete())
-                or (self.phase == "night" and elapsed >= 7 and self._decisions_complete())
+                self.phase in {"vote", "verdict", "night"}
+                and elapsed >= minimum
+                and self._decisions_complete()
             )
             if early_ready or (
                 self.phase != "lobby" and self.deadline and time.time() >= self.deadline
@@ -597,11 +630,11 @@ class Room:
         if victim_id and victim_id != saved_id and guarding and guarding[0] in self.players:
             guard = self.players[guarding[0]]
             guard.alive = False
-            self._record(f"경호원 {guard.nick}님이 누군가를 지키다 대신 희생되었습니다.")
+            self._record(f"{guard.nick}님이 누군가를 지키다 대신 죽었습니다.")
         elif victim_id and victim_id != saved_id and victim_id in self.players:
             victim = self.players[victim_id]
             victim.alive = False
-            self._record(f"새벽, {victim.nick}님이 싸늘한 주검으로 발견되었습니다.")
+            self._record(f"{victim.nick}님이 죽었습니다.")
         elif victim_id and victim_id == saved_id:
             self._record("누군가 습격받았지만 의사의 치료로 살아남았습니다.")
         else:
@@ -709,7 +742,7 @@ class Room:
 
     def _guide_for(self, viewer: Player) -> str:
         if self.phase == "lobby":
-            return "처음이라면 AI 플레이어를 채워 연습해 보세요. 방장은 퀵 모드로 약 8분 안에 한 판을 끝낼 수 있습니다."
+            return "처음이라면 AI 플레이어를 채워 연습해 보세요. 퀵은 약 12분, 클래식은 20분 이상 깊게 토론하는 흐름입니다."
         if self.phase == "reveal":
             return f"당신은 {ROLE_NAMES.get(viewer.role, viewer.role)}입니다. 역할 카드는 다른 사람에게 보이지 않으니 승리 조건부터 확인하세요."
         if not viewer.alive:
@@ -779,6 +812,7 @@ class Room:
                     "role": p.role if self.phase == "gameover" else None,
                     "bot": p.is_bot,
                     "score": p.score,
+                    "voice": p.voice and p.connected and not p.is_bot,
                 }
                 for p in self.players.values()
             ],

@@ -12,6 +12,7 @@ export type PlayerState = {
   role: Role | null;
   bot: boolean;
   score: number;
+  voice: boolean;
 };
 
 export type ChatMessage = { id: string; from: string; text: string; at: number };

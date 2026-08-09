@@ -1,5 +1,8 @@
 """Focused tests for the server-authoritative trial and room controls."""
 
+import asyncio
+import json
+
 from app.game import Player, Room, RoomManager
 
 
@@ -181,6 +184,7 @@ def test_complete_match_keeps_secrets_private_and_reaches_citizen_win():
 
     room._resolve_night()
     assert room.players["p5"].alive is False
+    assert room.case_log[-1] == "P5님이 죽었습니다."
     assert room.phase == "dawn"
     assert "마피아입니다" in room.players["p3"].intel[-1]
     assert room._state_for(room.players["p1"])["chat"][-1]["text"] == "P5를 습격합니다"
@@ -200,6 +204,27 @@ def test_complete_match_keeps_secrets_private_and_reaches_citizen_win():
     assert room.winner == "citizen"
     assert room.players["p1"].alive is False
     assert all(item["role"] for item in room._state_for(room.players["p2"])["players"])
+
+
+def test_voice_presence_and_signaling_stay_inside_the_room():
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        async def send_text(self, payload: str) -> None:
+            self.messages.append(payload)
+
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    socket = FakeSocket()
+    room.players["p2"].ws = socket
+    assert room.set_voice_presence("p1", True) is None
+    assert room.set_voice_presence("p2", True) is None
+    assert room._state_for(room.players["p1"])["players"][0]["voice"] is True
+
+    signal = {"kind": "candidate", "candidate": {"candidate": "test"}}
+    assert asyncio.run(room.relay_voice("p1", "p2", signal)) is None
+    payload = json.loads(socket.messages[-1])
+    assert payload == {"t": "voice_signal", "from": "p1", "data": signal}
 
 
 def test_rematch_erases_previous_public_and_mafia_chat():
