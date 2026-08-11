@@ -1,58 +1,225 @@
-# Black Midnight
+# Black Midnight — 검은 자정
 
 [![Production checks](https://github.com/boclair98/mafia-game/actions/workflows/ci.yml/badge.svg)](https://github.com/boclair98/mafia-game/actions/workflows/ci.yml)
 
-A cinematic, real-time Mafia social deduction game for 4–12 players. Create a private room, invite friends with one link, hide your role, survive the night, and expose the liars before the city falls.
+검은 자정은 4~12명이 브라우저에서 함께 플레이하는 실시간 음성 마피아 게임입니다. 단순히 `밤 → 투표`를 반복하는 것이 아니라, 플레이어의 발언과 질문, 판단, 투표가 사건 기록으로 연결되어 한 판이 끝났을 때 “어떤 거짓말이 사람들을 속였는가”를 다시 확인할 수 있도록 설계했습니다.
 
-**Live game:** [black-midnight.coders.kr](https://black-midnight.coders.kr)
+운영 버전은 [black-midnight.coders.kr](https://black-midnight.coders.kr)에서 바로 플레이할 수 있습니다. 설치는 필요하지 않으며, 방 링크를 공유하면 같은 사건에 참여할 수 있습니다.
 
-![Black Midnight cinematic city](frontend/public/midnight-city-ui.webp)
+![검은 자정의 도시와 게임 UI](frontend/public/midnight-city-ui.webp)
 
-## Highlights
+> 등장하는 인물 이미지는 모두 가상의 AI 생성 캐릭터이며 실제 인물을 나타내지 않습니다.
 
-- Real-time room matches powered by WebSockets
-- Server-authoritative roles, night actions, votes, and win conditions
-- Mafia, Doctor, Detective, Citizen, Bodyguard, Trickster, and Spectator roles
-- Full game loop: sealed identity → night action → dawn → discussion → public vote → final defense → execute/spare verdict
-- Private Mafia night chat and confidential Detective investigation records
-- Quick and Classic match pacing
-- AI players that can fill 4/6/8 seats, build a public suspicion, question suspects, act, defend themselves, and vote consistently
-- Personal secret missions and a private safe/suspicious evidence board
-- Adaptive Korean AI narrator with optional browser speech synthesis
-- Cinematic rule briefing for first-time players
-- Friend invitations through Web Share, copied room links, and generated invitation posters
-- Shareable post-game case report with the winning team, role, and round
-- Live emoji reactions, an animated courtroom, and a copyable full incident archive
-- Persistent signed-in leaderboard plus privacy-safe live player/match presence
-- Responsive mobile/desktop interface and installable PWA support
-- Reconnection keys, host controls, enforced ready state, rematches, local stats, scoring, and haptic feedback
-- Automatic inactive-room cleanup, message/reaction throttling, server-side input validation, and private state filtering
-- GitHub Actions production checks for frontend lint/build and backend tests/Ruff with PostgreSQL
-- WebP-optimized cinematic artwork for a substantially smaller mobile first load
+## 이 게임이 해결하려는 문제
 
-All character portraits are fictional AI-generated people and do not represent real individuals.
+온라인 마피아 게임은 기능이 많아도 토론이 정리되지 않으면 금방 소음이 됩니다. 모두가 동시에 말하고, 누가 무엇을 주장했는지 남지 않으며, 투표가 끝나면 이전 발언의 의미도 사라집니다. 그러면 추리보다 목소리가 큰 사람이 유리해집니다.
 
-## Tech Stack
+검은 자정은 마피아 게임의 재미를 다음 한 줄로 정의합니다.
 
-| Layer | Technology |
+> 말한다 → 기록된다 → 의심받는다 → 선택된다 → 진실이 드러난다.
+
+따라서 UI의 화려함보다 다음 세 가지를 우선합니다.
+
+1. 모든 참가자에게 실제 발언 기회가 돌아갈 것
+2. 발언과 판단이 다음 선택의 근거로 남을 것
+3. 결과 공개 후 과거의 말이 새롭게 해석될 것
+
+## 한 판은 어떻게 진행되는가
+
+### 1. 방 생성과 초대
+
+첫 참가자가 방장이 됩니다. 방장은 친구 초대 링크를 복사하거나 초대 포스터를 공유할 수 있습니다. 인원이 부족하면 AI 플레이어로 4명, 6명 또는 8명 테이블을 채울 수 있습니다.
+
+방장을 제외한 실제 참가자는 준비 버튼을 눌러야 합니다. 준비하지 않은 참가자가 있거나 최소 인원 4명을 충족하지 못하면 서버가 게임 시작을 거부합니다.
+
+### 2. 비밀 역할 배정
+
+게임이 시작되면 서버가 역할을 섞어 각 참가자에게 자신의 역할만 전달합니다. 다른 플레이어의 역할은 브라우저로 전송되지 않으므로 개발자 도구를 열어도 확인할 수 없습니다.
+
+인원에 따라 역할 구성이 달라집니다.
+
+| 역할 | 목표와 능력 |
 | --- | --- |
-| Frontend | Next.js 16, React 19, TypeScript, CSS, Lucide icons |
-| Realtime API | FastAPI, Python, WebSockets |
-| Database | PostgreSQL, SQLAlchemy, Alembic |
-| Packaging | Docker Compose, multi-stage Docker builds |
-| Hosting | coders.kr multi-service deployment |
+| 마피아 | 밤마다 시민을 습격합니다. 다른 마피아를 알고 비밀 채팅을 사용합니다. |
+| 의사 | 밤마다 한 명을 치료해 습격을 막습니다. 자신도 치료할 수 있습니다. |
+| 탐정 | 밤마다 한 명을 조사하고, 결과를 개인 기록으로 받습니다. |
+| 경호원 | 선택한 사람이 습격받으면 자신이 대신 사망합니다. 9명 이상일 때 등장합니다. |
+| 광대 | 시민 투표로 처형되면 즉시 단독 승리합니다. 6명 이상일 때 등장합니다. |
+| 시민 | 능력은 없지만 심문·기록·투표로 마피아를 찾아냅니다. |
+| 관전자 | 진행 중인 방에 늦게 들어온 참가자입니다. 다음 판을 기다리며 사건을 관전합니다. |
 
-## Run Locally
+### 3. 밤의 비밀 행동
 
-The easiest way to start the complete stack is Docker Compose:
+마피아, 의사, 탐정, 경호원은 제한 시간 안에 대상을 선택합니다. 선택은 시간이 끝나기 전까지 바꿀 수 있습니다. 모든 능력 보유자가 선택을 마쳐도 최소 연출 시간이 지나기 전에는 밤이 종료되지 않습니다.
+
+마피아 채팅과 탐정 조사 결과는 대상이 아닌 참가자에게 전송되지 않습니다. 승패 판정과 능력 충돌도 모두 서버에서 처리합니다.
+
+### 4. 새벽 사건 보고와 유언
+
+습격이 성공하면 설정한 닉네임 그대로 사망을 발표합니다. 예를 들어 닉네임이 `이희승3`이면 `이희승3님이 죽었습니다.`라고 기록하고 아나운서가 읽습니다.
+
+그날 밤 사망한 플레이어는 새벽 동안 단 한 번 유언을 남길 수 있습니다. 유언은 모든 참가자에게 공개되고 사건 파일에 영구 기록됩니다. 이미 알고 있던 정보를 남길지, 마지막 거짓말을 남길지는 플레이어의 선택입니다.
+
+### 5. 공개 심문
+
+낮이 되면 자유 발언 대신 생존자에게 순서대로 발언권이 돌아갑니다. 인원이 많으면 낮 시간이 자동으로 늘어나 모든 생존자가 최소한의 진술 시간을 확보합니다.
+
+현재 발언자는 다음 권한을 가집니다.
+
+- 음성 마이크 활성화
+- 공개 채팅 진술
+- 해당 라운드에서 한 번만 가능한 `공식 진술 봉인`
+
+나머지 생존자는 다음 행동을 할 수 있습니다.
+
+- 현재 발언자에게 텍스트 질문 보내기
+- 발언자를 `신뢰`, `보류`, `의심` 중 하나로 개인 판단하기
+- 질문과 이전 사건 기록을 비교하기
+
+개인 판단은 심문 중에는 다른 사람에게 보이지 않습니다. 이는 다수 의견을 보고 따라가는 밴드왜건 현상을 줄이기 위한 규칙입니다.
+
+### 6. 판단 공개와 시민 투표
+
+심문이 끝나고 투표가 시작되면 각 플레이어가 받았던 신뢰·보류·의심 수가 공개됩니다. 이 수치는 증거가 아니라 당시 시민들의 심리를 보여주는 참고 자료입니다. 마피아가 서로 신뢰를 주거나 시민이 억울한 사람을 의심할 수도 있습니다.
+
+생존자는 자신을 제외한 한 명에게 투표할 수 있습니다. 단독 최다 득표자가 없으면 그날은 피고 없이 종료됩니다.
+
+### 7. 최후 변론과 판결
+
+단독 최다 득표자는 즉시 처형되지 않습니다. 피고에게만 최후 변론권이 주어지고, 나머지는 변론이 끝난 뒤 `처형` 또는 `석방`을 선택합니다.
+
+처형표가 석방표보다 많을 때만 처형됩니다. 동률은 석방입니다. 광대가 이 절차로 처형되면 다른 팀의 상태와 관계없이 광대가 단독 승리합니다.
+
+### 8. 사건 리플레이
+
+게임 종료 후 모든 역할이 공개됩니다. 종료 화면은 다음과 같은 결정적 장면을 시간순으로 보여줍니다.
+
+- 공식 진술
+- 밤의 사망 또는 구조
+- 마지막 유언
+- 최종 피고 지목
+- 처형 또는 석방
+- 승리 조건 달성
+
+이 리플레이를 보면 시민이 틀린 이유, 마피아의 결정적 거짓말, 믿지 말았어야 할 진술을 다음 판의 전략으로 바꿀 수 있습니다.
+
+## 승리 조건
+
+- 시민 팀: 살아 있는 마피아가 0명이 되면 승리합니다.
+- 마피아 팀: 살아 있는 마피아 수가 나머지 생존자 수 이상이 되면 승리합니다.
+- 광대: 시민의 최종 판결로 처형되면 즉시 단독 승리합니다.
+
+## 음성 채팅은 어떻게 동작하는가
+
+`음성 참여` 버튼을 누른 참가자만 마이크 권한을 요청합니다. 음성은 WebRTC 피어 투 피어 방식으로 참가자 브라우저 사이에 직접 전달되고, 기존 게임 WebSocket은 연결 협상 정보만 중계합니다.
+
+게임 단계에 따라 클라이언트가 마이크를 자동 제어합니다.
+
+| 단계 | 음성 발언자 |
+| --- | --- |
+| 대기실 | 음성 참여자 전체 |
+| 밤·새벽·결과 공개 | 모두 자동 음소거 |
+| 낮 공개 심문 | 현재 발언자 한 명 |
+| 시민 투표 | 생존한 음성 참여자 전체 |
+| 최후 변론 | 피고 한 명 |
+| 최종 판결 | 모두 자동 음소거 |
+| 게임 종료 | 음성 참여자 전체 |
+
+현재 구현은 별도 미디어 서버가 없는 소규모 메시 연결입니다. 4~8명에서 가장 안정적이며, 12명이 모두 음성에 참여하면 각 브라우저의 업로드 연결 수가 증가합니다. 상용 대규모 방으로 확장할 때는 SFU 방식의 미디어 서버와 서버 측 발언권 제어가 필요합니다.
+
+## AI 플레이어
+
+AI 좌석은 단순히 무작위 투표만 하지 않습니다.
+
+- 역할에 맞는 밤 행동을 선택합니다.
+- 낮 심문 차례에 특정 참가자를 질문하거나 의심합니다.
+- 심문 대상에게 신뢰·보류·의심 판단을 남깁니다.
+- 이전에 의심한 대상을 가능한 한 일관되게 투표합니다.
+- 피고가 되면 최후 변론을 남깁니다.
+- 마피아 AI는 동료 마피아를 습격하지 않고 심문 판단에서도 보호하려 합니다.
+
+AI는 대규모 언어 모델 API를 호출하지 않습니다. 서버 내부의 제한된 전략 규칙으로 동작하므로 API 키가 필요 없고 응답 지연이나 사용 비용이 없습니다.
+
+## 초보자를 위한 안내
+
+처음 접속하면 역할과 투표 흐름을 설명하는 장면형 튜토리얼이 표시됩니다. 게임 중에는 서버가 현재 역할과 단계에 맞는 지령을 생성합니다.
+
+예를 들어 탐정은 최근 조사 결과를 공개할지 숨길지 안내받고, 피고는 최후 변론에서 확인 가능한 사실을 제시하라는 지령을 받습니다. 안내는 정답을 알려주는 기능이 아니라 처음 하는 사람이 지금 무엇을 해야 하는지 놓치지 않도록 돕는 장치입니다.
+
+## 기술 구조
+
+| 영역 | 기술 | 담당하는 일 |
+| --- | --- | --- |
+| 웹 UI | Next.js 16, React 19, TypeScript | 화면, PWA, WebRTC 음성, 효과음과 브라우저 음성 합성 |
+| 실시간 게임 서버 | FastAPI, Python, WebSocket | 방 상태, 역할, 타이머, 심문, 질문, 판단, 투표, 승패 |
+| 데이터베이스 | PostgreSQL, SQLAlchemy, Alembic | 로그인 사용자의 최고 점수와 랭킹 |
+| 배포 | Docker, coders.kr | 정적 웹, API, PostgreSQL을 각각 서비스로 배포 |
+
+게임 중인 방은 서버 메모리에 존재합니다. WebSocket이 끊기면 세션 키로 같은 좌석에 재접속할 수 있지만, 서버 인스턴스 자체가 완전히 교체되면 진행 중인 방은 복구되지 않습니다. 장기 운영에서 무중단 게임 복구가 필요하다면 Redis 또는 영속 이벤트 저장소로 방 상태를 이전해야 합니다.
+
+## 서버 권한 모델
+
+브라우저는 화면과 입력을 담당하지만 게임의 진실을 결정하지 않습니다. 다음 항목은 서버가 검증합니다.
+
+- 역할 배정과 역할별 행동 가능 여부
+- 살아 있는 대상인지, 자기 자신을 선택할 수 있는지
+- 마피아가 같은 마피아를 공격하는지
+- 현재 발언자만 낮 진술을 보내는지
+- 질문자와 판단자가 생존 상태인지
+- 유언을 남길 수 있는 사망자인지, 이미 사용했는지
+- 투표와 최종 판결 참여 자격
+- 사망 처리와 승리 조건
+- 비밀 채팅 및 조사 결과의 수신 범위
+
+메시지 길이와 전송 빈도도 제한합니다. 비정상 명령은 상태를 바꾸지 않고 해당 사용자에게 오류로 반환합니다.
+
+## 실시간 프로토콜 개요
+
+클라이언트는 `/api/ws`에 연결해 다음과 같은 명령을 보냅니다.
+
+| 명령 | 의미 |
+| --- | --- |
+| `ready`, `start`, `rematch` | 대기실과 경기 생명주기 |
+| `action` | 역할별 밤 행동 |
+| `question`, `claim`, `read` | 심문 질문, 공식 진술, 개인 판단 |
+| `will` | 새벽의 1회 유언 |
+| `vote`, `judge` | 시민 투표와 처형·석방 판결 |
+| `chat`, `react` | 단계별 채팅과 빠른 반응 |
+| `voice_presence`, `voice_signal` | 음성 참여 상태와 WebRTC 협상 중계 |
+
+서버는 참가자마다 필터링된 `state` 스냅샷을 전송합니다. 같은 방에 있어도 마피아와 시민이 받는 채팅 목록, 탐정의 조사 기록, 동료 마피아 표시는 서로 다릅니다.
+
+## 프로젝트 구조
+
+```text
+mafia-game/
+├─ frontend/
+│  ├─ app/                 메인 게임 화면과 전역 스타일
+│  ├─ lib/                 게임 타입, WebSocket, WebRTC, API 유틸리티
+│  └─ public/              PWA와 최적화된 게임 이미지
+├─ backend/
+│  ├─ app/game.py          서버 권한 게임 엔진
+│  ├─ app/routes/ws.py     실시간 명령 프로토콜
+│  ├─ app/routes/          상태·랭킹 HTTP API
+│  └─ tests/               게임 흐름, WebSocket, DB 회귀 테스트
+├─ compose.yaml            로컬 전체 스택
+├─ coders.yaml             운영 멀티 서비스 배포 선언
+└─ .github/workflows/ci.yml 프론트·백엔드 자동 검증
+```
+
+## 로컬에서 실행하기
+
+### 전체 스택
+
+Docker가 설치되어 있다면 저장소 루트에서 다음 명령으로 웹, API, PostgreSQL을 함께 실행할 수 있습니다.
 
 ```bash
 docker compose up --build
 ```
 
-Open [http://localhost:3000](http://localhost:3000), then join the same room code from multiple browser windows.
+브라우저에서 `http://localhost:3000`을 열고, 서로 다른 브라우저 창에서 같은 방 코드로 입장하면 됩니다. 마이크 테스트는 동일한 장치에서 하울링이 발생할 수 있으므로 이어폰을 사용하는 것이 좋습니다.
 
-### Frontend only
+### 프론트엔드만 실행하기
 
 ```bash
 cd frontend
@@ -60,49 +227,78 @@ pnpm install
 pnpm dev
 ```
 
-### Backend only
+개발 모드의 Next.js 서버는 운영 nginx의 WebSocket 프록시를 그대로 제공하지 않습니다. 전체 실시간 흐름을 확인하려면 Docker Compose를 사용하거나 프론트의 WebSocket URL 환경을 로컬 API에 맞춰야 합니다.
+
+### 백엔드만 실행하기
+
+Python 3.12 이상과 실행 중인 PostgreSQL이 필요합니다.
 
 ```bash
 cd backend
-uv sync
+uv sync --extra dev
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
-## Project Structure
+필요한 환경 변수 예시는 `backend/.env.example`에 있습니다. 핵심 값은 SQLAlchemy 형식의 `DATABASE_URL`입니다.
 
-```text
-frontend/   Next.js static-export client and PWA assets
-backend/    FastAPI WebSocket game server and tests
-coders.yaml Multi-service production deployment manifest
-compose.yaml Local frontend, backend, and PostgreSQL stack
-```
+## 테스트와 품질 검사
 
-## Validation
+프론트엔드는 ESLint와 실제 프로덕션 빌드를 모두 통과해야 합니다.
 
 ```bash
 cd frontend
 pnpm lint
 pnpm build
-
-cd ../backend
-uv sync --extra dev
-uv run pytest -q
 ```
 
-The backend includes WebSocket and focused server-authoritative game-flow tests under `backend/tests`. The trial suite covers vote ties, final defense permissions, execute/spare ties, Trickster wins, bot seat management, reaction controls, and readiness enforcement.
+백엔드는 실제 PostgreSQL을 사용해 랭킹 API까지 검사합니다.
 
-## Match Rules
+```bash
+cd backend
+uv sync --extra dev
+uv run pytest -q
+uv run ruff check app tests
+```
 
-1. The host invites friends and can fill the room to 4, 6, or 8 seats with AI players.
-2. Every non-host human confirms readiness; the server then seals and privately assigns roles.
-3. At night, Mafia attack, Doctor heals, Detective investigates, and Bodyguard protects. Only Mafia can use the private night channel.
-4. During the day, everyone compares claims, marks a private evidence board, and uses public reactions.
-5. A unique public-vote leader becomes the accused. Only that player may speak during final defense.
-6. Living players except the accused choose execute or spare. A tie means spare.
-7. Citizens win when every Mafia member is gone; Mafia win at parity; the Trickster wins immediately when executed by the city.
+테스트는 다음을 포함합니다.
 
-Secret roles, night commands, Detective intel, Mafia chat, verdict validation, and win calculations are all enforced on the server rather than trusted to the browser.
+- 비밀 역할과 마피아 채팅이 다른 플레이어에게 노출되지 않는지
+- 밤 행동, 치료, 조사, 사망과 승리 판정
+- 공개 심문의 발언자 권한
+- 질문, 공식 진술, 비공개 판단과 투표 전 공개
+- 사망자의 1회 유언 제한
+- 동률 투표, 최후 변론, 처형과 석방
+- 광대 단독 승리
+- AI 좌석 관리와 준비 상태
+- WebSocket 재접속과 입력 검증
+- PostgreSQL 랭킹 저장과 최고 점수 유지
 
-## Deployment
+main 브랜치에 푸시하면 GitHub Actions가 PostgreSQL 16 서비스와 함께 모든 검사를 다시 실행합니다.
 
-The repository includes a `coders.yaml` manifest for a static Next.js frontend, a FastAPI service, and PostgreSQL. The production game is available at [black-midnight.coders.kr](https://black-midnight.coders.kr).
+## 배포
+
+`coders.yaml`은 세 서비스를 선언합니다.
+
+1. 정적으로 내보낸 Next.js 화면을 제공하고 `/api`와 WebSocket을 프록시하는 nginx 웹 서비스
+2. FastAPI 게임 서버
+3. PostgreSQL 데이터베이스
+
+WebSocket은 장시간 연결되므로 웹과 API 서비스 모두 요청 제한 시간을 3600초로 설정했습니다. 클라이언트는 배포나 인프라 교체로 연결이 끊겨도 지수 백오프로 재접속하고 세션 키로 기존 좌석을 복구합니다.
+
+운영 주소: [https://black-midnight.coders.kr](https://black-midnight.coders.kr)
+
+## 현재 한계와 다음 확장 지점
+
+이 저장소는 실제 플레이 가능한 서비스지만 다음 영역은 규모가 커질 때 추가 작업이 필요합니다.
+
+- 방 상태 영속화: 서버 교체 후에도 진행 중인 경기를 복구하려면 Redis 또는 이벤트 저장소가 필요합니다.
+- 대규모 음성: 8명 이상 안정성과 강제 음소거를 높이려면 SFU 미디어 서버가 필요합니다.
+- 신고와 운영 도구: 공개 서비스 확장 전 음성·채팅 신고, 차단, 운영자 감사 로그가 필요합니다.
+- 매치메이킹: 현재는 초대 링크 중심이며 공개 방 검색이나 실력 기반 매칭은 없습니다.
+- 관전 지연: 경쟁 모드에서는 관전자가 실시간 정보를 전달하지 못하도록 지연 스트림이 필요합니다.
+
+이 한계를 숨기지 않는 이유는 README가 홍보 문구가 아니라, 다음 개발자가 무엇을 신뢰할 수 있고 무엇을 개선해야 하는지 판단하는 운영 문서여야 하기 때문입니다.
+
+## 라이선스와 자산
+
+프로젝트의 코드와 이미지 사용 조건은 저장소 소유자의 정책을 따릅니다. 제3자 아이콘은 Lucide를 사용하며, 인물 및 배경 이미지는 게임을 위해 제작된 가상 자산입니다. 외부 서비스나 상용 제품에 재사용하기 전 저장소 소유자에게 사용 범위를 확인하세요.

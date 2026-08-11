@@ -85,7 +85,7 @@ type AudioWindow = Window & typeof globalThis & { webkitAudioContext?: typeof Au
 
 const TUTORIAL_SCENES = [
   { tag: "SCENE 01 · 정체", title: "밤에는 역할이 움직입니다", copy: "마피아는 습격하고, 의사와 경호원은 누군가를 지키며, 탐정은 단 한 명의 진실을 확인합니다.", icon: Moon },
-  { tag: "SCENE 02 · 심문", title: "낮에는 말이 증거입니다", copy: "누구를 선택했는지 묻고 이전 주장과 비교하세요. AI 진행자가 현재 역할에 필요한 질문을 바로 알려줍니다.", icon: MessageCircle },
+  { tag: "SCENE 02 · 심문", title: "낮에는 말이 증거입니다", copy: "모든 생존자에게 순서대로 발언권이 열립니다. 질문을 보내고 신뢰·보류·의심을 비공개로 기록한 뒤 투표 전에 판단 결과를 확인하세요.", icon: MessageCircle },
   { tag: "SCENE 03 · 반전", title: "수상하다고 모두 마피아는 아닙니다", copy: "광대는 시민 투표로 처형되면 혼자 승리합니다. 표를 던지기 전 동기와 행동 결과를 함께 확인하세요.", icon: Sparkles },
   { tag: "SCENE 04 · 재판", title: "지목은 곧 처형이 아닙니다", copy: "가장 많은 표를 받은 피고에게 최후 변론이 주어집니다. 진술을 들은 생존자들이 처형 또는 석방을 최종 결정합니다.", icon: Gavel },
   { tag: "SCENE 05 · 복기", title: "모든 거짓말은 사건 파일에 남습니다", copy: "게임이 끝나면 역할과 전체 사건 기록을 되짚어 보세요. 다음 판에는 같은 거짓말이 통하지 않을 겁니다.", icon: BookOpen },
@@ -124,6 +124,9 @@ export default function GamePage() {
   const [game, setGame] = useState<GameState | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [chatText, setChatText] = useState("");
+  const [questionText, setQuestionText] = useState("");
+  const [claimText, setClaimText] = useState("");
+  const [willText, setWillText] = useState("");
   const [notice, setNotice] = useState("");
   const [now, setNow] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -153,7 +156,8 @@ export default function GamePage() {
   const countdownRemaining = game ? secondsLeft(game.deadline, now) : 0;
   const narrationText = game && soundPhase ? phaseNarration(game, soundPhase) : "";
   const voiceCanSpeak = Boolean(game?.me.alive && (
-    ["lobby", "day", "vote", "gameover"].includes(game.phase)
+    ["lobby", "vote", "gameover"].includes(game.phase)
+    || (game.phase === "day" && game.me.id === game.speaker_id)
     || (game.phase === "defense" && game.me.id === game.accused_id)
   ));
   const voicePeerKey = game?.players.filter((player) => player.voice && !player.bot && player.id !== game.me.id).map((player) => player.id).sort().join("|") ?? "";
@@ -356,6 +360,18 @@ export default function GamePage() {
             decision_progress: next.decision_progress ?? { completed: 0, total: 0 },
             case_log: next.case_log ?? next.story ?? [],
             reactions: next.reactions ?? [],
+            speaker_id: next.speaker_id ?? null,
+            speaker_deadline: next.speaker_deadline ?? 0,
+            interrogation_order: next.interrogation_order ?? [],
+            questions: next.questions ?? [],
+            claims: next.claims ?? [],
+            read_summary: next.read_summary ?? {},
+            moments: next.moments ?? [],
+            me: {
+              ...next.me,
+              reads: next.me.reads ?? {},
+              can_leave_will: next.me.can_leave_will ?? false,
+            },
           });
           setSelected((current) => current && next.players.some((p) => p.id === current && p.alive) ? current : null);
         } else if (msg.t === "error") {
@@ -415,7 +431,12 @@ export default function GamePage() {
   const unreadyPlayers = game?.players.filter((player) => !player.bot && player.id !== game.host && !player.ready) ?? [];
   const readyHumans = game?.players.filter((player) => !player.bot && (player.id === game.host || player.ready)).length ?? 0;
   const humanCount = game?.players.filter((player) => !player.bot).length ?? 0;
-  const canChat = Boolean(game && ["lobby", "day", "vote", "gameover"].includes(game.phase)
+  const currentSpeaker = game?.players.find((player) => player.id === game.speaker_id) ?? null;
+  const currentSpeakerIndex = currentSpeaker && game ? game.players.findIndex((player) => player.id === currentSpeaker.id) : 0;
+  const isCurrentSpeaker = Boolean(game && game.me.id === game.speaker_id);
+  const speakerRemaining = game ? secondsLeft(game.speaker_deadline, now) : 0;
+  const canChat = Boolean(game && ["lobby", "vote", "gameover"].includes(game.phase)
+    || game?.phase === "day" && isCurrentSpeaker && game.me.alive
     || game?.phase === "defense" && isAccused && game.me.alive
     || game?.phase === "night" && role === "mafia" && game.me.alive);
   const canReact = Boolean(game && ["day", "vote", "defense", "verdict", "gameover"].includes(game.phase));
@@ -636,6 +657,30 @@ export default function GamePage() {
     setChatText("");
   };
 
+  const submitQuestion = (event: FormEvent) => {
+    event.preventDefault();
+    const text = questionText.trim();
+    if (!text || !currentSpeaker) return;
+    send({ t: "question", text });
+    setQuestionText("");
+  };
+
+  const submitClaim = (event: FormEvent) => {
+    event.preventDefault();
+    const text = claimText.trim();
+    if (!text) return;
+    send({ t: "claim", text });
+    setClaimText("");
+  };
+
+  const submitWill = (event: FormEvent) => {
+    event.preventDefault();
+    const text = willText.trim();
+    if (!text) return;
+    send({ t: "will", text });
+    setWillText("");
+  };
+
   const copyCaseFile = async () => {
     if (!game) return;
     const roles = game.players.filter((player) => player.role).map((player) => `${player.n} — ${ROLE_META[player.role!].name} · ${player.score}점`).join("\n");
@@ -748,6 +793,30 @@ export default function GamePage() {
               <Gavel size={30} />
             </div>
           )}
+          {game.phase === "day" && currentSpeaker && (
+            <section className="interrogation-stage" aria-label="공개 심문">
+              <div className={`interrogation-photo avatar-photo avatar-${Math.max(0, currentSpeakerIndex) % 12}`}><span>ON AIR</span></div>
+              <div className="interrogation-main">
+                <div className="interrogation-heading"><span>PUBLIC INTERROGATION · ROUND {game.round}</span><b>{currentSpeaker.n}님의 공개 진술</b><em>{speakerRemaining}초</em></div>
+                <div className="speaker-order">{game.interrogation_order.map((id, index) => { const player = game.players.find((item) => item.id === id); return <span key={id} className={id === game.speaker_id ? "active" : ""}>{index + 1}. {player?.n ?? "?"}</span>; })}</div>
+                <div className="question-feed">{game.questions.length === 0 ? <p>아직 도착한 질문이 없습니다. 발언의 모순을 구체적으로 질문하세요.</p> : game.questions.map((question) => <p key={question.id}><b>{question.from}</b><span>{question.text}</span></p>)}</div>
+                {isCurrentSpeaker ? (
+                  <form className="claim-form" onSubmit={submitClaim}><input value={claimText} onChange={(event) => setClaimText(event.target.value)} maxLength={120} placeholder="이번 라운드의 핵심 주장을 한 문장으로 봉인하세요" /><button disabled={!claimText.trim() || game.claims.some((claim) => claim.round === game.round && claim.speaker_id === game.me.id)}><LockKeyhole size={14} />공식 진술 봉인</button></form>
+                ) : game.me.alive ? (
+                  <div className="interrogation-response">
+                    <form onSubmit={submitQuestion}><input value={questionText} onChange={(event) => setQuestionText(event.target.value)} maxLength={100} placeholder={`${currentSpeaker.n}님에게 질문하기`} /><button disabled={!questionText.trim()}><Send size={14} /></button></form>
+                    <div><span>나의 현재 판단</span>{(["trust", "hold", "suspect"] as const).map((stance) => <button key={stance} className={game.me.reads[currentSpeaker.id] === stance ? `active ${stance}` : stance} onClick={() => send({ t: "read", target: currentSpeaker.id, stance })}>{stance === "trust" ? "신뢰" : stance === "hold" ? "보류" : "의심"}</button>)}</div>
+                  </div>
+                ) : <div className="interrogation-observer">사망자는 질문과 판단에 참여할 수 없지만 모든 진술을 열람할 수 있습니다.</div>}
+              </div>
+            </section>
+          )}
+          {game.phase === "vote" && Object.keys(game.read_summary).length > 0 && (
+            <section className="read-summary-panel"><header><Search size={16} /><span><b>심문 사전 판단 공개</b><small>투표 전까지 비공개였던 신뢰·의심 기록입니다. 다수의 판단이 진실을 보장하지는 않습니다.</small></span></header><div>{game.players.filter((player) => player.alive).map((player) => { const summary = game.read_summary[player.id] ?? { trust: 0, hold: 0, suspect: 0 }; return <article key={player.id}><b>{player.n}</b><span className="trust">신뢰 {summary.trust}</span><span>보류 {summary.hold}</span><span className="suspect">의심 {summary.suspect}</span></article>; })}</div></section>
+          )}
+          {game.phase === "gameover" && game.moments.length > 0 && (
+            <section className="replay-panel"><header><Film size={17} /><span><b>결정적 장면 리플레이</b><small>주장과 판결이 어떻게 승부를 바꿨는지 시간순으로 복기합니다.</small></span></header><div>{game.moments.slice(-8).map((moment, index) => <article key={moment.id}><span>{String(index + 1).padStart(2, "0")}</span><div><small>{moment.kind.toUpperCase()} · DAY {moment.round}</small><p>{moment.text}</p></div></article>)}</div></section>
+          )}
           <div className="reaction-layer" aria-live="polite">{game.reactions.map((reaction, index) => <div key={reaction.id} style={{ left: `${12 + (index * 17) % 74}%`, animationDelay: `${(index % 3) * .08}s` }}><b>{reaction.emoji}</b><span>{reaction.from}</span></div>)}</div>
           <div className="player-grid">
             {game.players.map((player, index) => (
@@ -761,7 +830,7 @@ export default function GamePage() {
           <div className="action-bar">
             {game.phase === "lobby" && (
               <>
-                <div><b>{game.players.length}/{game.max_players}명 등록 · 사람 준비 {readyHumans}/{humanCount} · {game.pace === "quick" ? "퀵 8분" : "클래식 15분"}</b><span>{unreadyPlayers.length ? `${unreadyPlayers.map((player) => player.n).slice(0, 3).join(", ")}님의 준비를 기다리는 중입니다.` : "역할 배정 준비가 끝났습니다."}</span></div>
+                <div><b>{game.players.length}/{game.max_players}명 등록 · 사람 준비 {readyHumans}/{humanCount} · {game.pace === "quick" ? "퀵 약 12분" : "클래식 20분+"}</b><span>{unreadyPlayers.length ? `${unreadyPlayers.map((player) => player.n).slice(0, 3).join(", ")}님의 준비를 기다리는 중입니다.` : "역할 배정 준비가 끝났습니다."}</span></div>
                 {game.host === game.me.id && <div className="pace-switch"><button className={game.pace === "quick" ? "active" : ""} onClick={() => send({ t: "pace", pace: "quick" })}><TimerReset size={14} />퀵 · 약 12분</button><button className={game.pace === "classic" ? "active" : ""} onClick={() => send({ t: "pace", pace: "classic" })}>클래식 · 20분+</button></div>}
                 {game.host === game.me.id && <div className="bot-fill-switch"><Bot size={14} /><span>AI 인원</span>{[4, 6, 8].map((target) => <button key={target} className={game.players.length === target ? "active" : ""} onClick={() => send({ t: "fill_bots", target })}>{target}</button>)}</div>}
                 <button className="secondary-button" onClick={() => setInviteOpen(true)}><UserPlus size={17} />친구 초대</button>
@@ -774,7 +843,8 @@ export default function GamePage() {
             )}
             {game.phase === "night" && (!game.me.alive || role === "citizen") && <div><b>도시가 잠들었습니다</b><span>{game.me.alive ? "아침이 올 때까지 눈을 감고 기다리세요." : "남은 플레이어들의 밤을 지켜보고 있습니다."}</span></div>}
             {game.phase === "vote" && game.me.alive && <><div><b>처형할 사람을 선택하세요</b><span>투표 완료 {game.decision_progress.completed}/{game.decision_progress.total} · 모두 투표하면 자동 마감됩니다.</span></div><button className="danger-button seal-button" disabled={!selected} onClick={() => commitDecision("vote")}><LockKeyhole size={17} />{game.me.vote_target ? "투표 변경" : "투표 봉인"}</button></>}
-            {game.phase === "day" && <div><b>자유 토론 시간</b><span>누가 거짓말하고 있는지 질문하고 기억하세요.</span></div>}
+            {game.phase === "day" && <div><b>{isCurrentSpeaker ? "당신의 공개 심문" : `${currentSpeaker?.n ?? "다음 참가자"}님의 공개 심문`}</b><span>{isCurrentSpeaker ? "음성과 채팅 발언권이 열렸습니다. 핵심 주장을 봉인하세요." : "질문을 보내고 신뢰·보류·의심 중 하나를 비공개로 기록하세요."}</span></div>}
+            {game.phase === "dawn" && game.me.can_leave_will && <form className="will-form" onSubmit={submitWill}><div><b>마지막 유언 1회</b><span>다음 토론에 남길 마지막 단서를 작성하세요.</span></div><input value={willText} onChange={(event) => setWillText(event.target.value)} maxLength={120} placeholder="마지막으로 시민에게 남길 말" /><button className="danger-button" disabled={!willText.trim()}><Skull size={16} />유언 공개</button></form>}
             {game.phase === "defense" && <div><b>{isAccused ? "당신의 최후 변론" : `${accusedPlayer?.n ?? "피고"}의 최후 변론`}</b><span>{isAccused ? "채팅창에서 마지막 진술을 남기세요." : "지금은 피고만 발언할 수 있습니다."}</span></div>}
             {game.phase === "verdict" && game.me.alive && !isAccused && <><div><b>도시의 최종 판결</b><span>판결 완료 {game.decision_progress.completed}/{game.decision_progress.total} · 모두 결정하면 자동 집행됩니다.</span></div><button className={game.me.judgement === false ? "secondary-button judgement-selected" : "secondary-button"} aria-pressed={game.me.judgement === false} onClick={() => commitJudgement(false)}><ShieldCheck size={17} />석방</button><button className={game.me.judgement === true ? "danger-button judgement-selected" : "danger-button"} aria-pressed={game.me.judgement === true} onClick={() => commitJudgement(true)}><Gavel size={17} />처형</button></>}
             {game.phase === "verdict" && (!game.me.alive || isAccused) && <div><b>판결 집계 중</b><span>{isAccused ? "도시가 당신의 운명을 결정하고 있습니다." : "생존한 시민의 판결을 기다리고 있습니다."}</span></div>}
@@ -793,10 +863,10 @@ export default function GamePage() {
                 <button className={voiceChatOn ? "leave" : "join"} onClick={() => void toggleVoiceChat()}>{voiceChatOn ? <><PhoneOff size={14} />나가기</> : <><Mic size={14} />음성 참여</>}</button>
               </div>
             </div>
-            <div className="chat-title"><div><MessageCircle size={16} /><b>{game.phase === "night" && role === "mafia" ? "마피아 비밀 채팅" : "테이블 대화"}</b></div><span>{canChat ? "대화 가능" : "침묵 중"}</span></div>
+            <div className="chat-title"><div><MessageCircle size={16} /><b>{game.phase === "night" && role === "mafia" ? "마피아 비밀 채팅" : game.phase === "day" ? "공개 진술 기록" : "테이블 대화"}</b></div><span>{canChat ? "대화 가능" : game.phase === "day" ? "발언권 대기" : "침묵 중"}</span></div>
             <div className="chat-scroll">{game.chat.length === 0 && <div className="empty-chat">아직 대화가 없습니다.</div>}{game.chat.map((msg) => <div className="chat-message" key={msg.id}><b>{msg.from}</b><p>{msg.text}</p></div>)}<div ref={chatEndRef} /></div>
             {canReact && <div className="reaction-dock" aria-label="빠른 리액션">{REACTION_EMOJIS.map((emoji) => <button key={emoji} onClick={() => send({ t: "react", emoji })} aria-label={`${emoji} 리액션 보내기`}>{emoji}</button>)}</div>}
-            <form className="chat-form" onSubmit={submitChat}><input value={chatText} onChange={(e) => setChatText(e.target.value)} disabled={!canChat} placeholder={canChat ? "메시지를 입력하세요" : "지금은 말할 수 없습니다"} maxLength={160} /><button disabled={!canChat || !chatText.trim()} aria-label="메시지 전송"><Send size={16} /></button></form>
+            <form className="chat-form" onSubmit={submitChat}><input value={chatText} onChange={(e) => setChatText(e.target.value)} disabled={!canChat} placeholder={canChat ? (game.phase === "day" ? "발언 내용은 공개 기록으로 남습니다" : "메시지를 입력하세요") : game.phase === "day" ? "질문은 공개 심문 카드에서 보내세요" : "지금은 말할 수 없습니다"} maxLength={160} /><button disabled={!canChat || !chatText.trim()} aria-label="메시지 전송"><Send size={16} /></button></form>
           </div>
         </aside>
       </div>

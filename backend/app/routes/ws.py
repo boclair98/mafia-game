@@ -108,6 +108,18 @@ async def game_socket(
                     error = arena.add_reaction(player.id, str(msg.get("emoji", "")))
                 case "chat":
                     error = arena.add_chat(player.id, str(msg.get("text", "")))
+                case "question":
+                    error = arena.add_question(player.id, str(msg.get("text", "")))
+                case "claim":
+                    error = arena.add_claim(player.id, str(msg.get("text", "")))
+                case "read":
+                    error = arena.submit_read(
+                        player.id,
+                        str(msg.get("target", "")),
+                        str(msg.get("stance", "")),
+                    )
+                case "will":
+                    error = arena.leave_will(player.id, str(msg.get("text", "")))
                 case "voice_presence":
                     if not isinstance(msg.get("enabled"), bool):
                         error = "잘못된 음성 채팅 상태입니다."

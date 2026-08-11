@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 
 from app.game import Player, Room, RoomManager
 
@@ -225,6 +226,45 @@ def test_voice_presence_and_signaling_stay_inside_the_room():
     assert asyncio.run(room.relay_voice("p1", "p2", signal)) is None
     payload = json.loads(socket.messages[-1])
     assert payload == {"t": "voice_signal", "from": "p1", "data": signal}
+
+
+def test_day_interrogation_records_claim_questions_and_private_reads():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.round = 1
+    room.phase = "day"
+    room.phase_started_at = time.time()
+    room.deadline = room.phase_started_at + 96
+    room._start_interrogation()
+
+    assert room.speaker_id == "p1"
+    assert room.add_claim("p1", "저는 시민이고 P3의 주장이 이상합니다") is None
+    assert room.add_question("p2", "어젯밤 누구를 선택했나요?") is None
+    assert room.submit_read("p2", "p1", "suspect") is None
+
+    state = room._state_for(room.players["p2"])
+    assert state["me"]["reads"] == {"p1": "suspect"}
+    assert state["questions"][-1]["from"] == "P2"
+    assert state["claims"][-1]["speaker"] == "P1"
+    assert state["read_summary"] == {}
+
+    room.phase = "vote"
+    summary = room._state_for(room.players["p2"])["read_summary"]
+    assert summary["p1"]["suspect"] == 1
+
+
+def test_night_victim_can_leave_one_public_will_at_dawn():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.round = 1
+    room.phase = "night"
+    room.actions = {"p1": "p4", "p2": "p2", "p3": "p1"}
+
+    room._resolve_night()
+
+    assert room.phase == "dawn"
+    assert room._state_for(room.players["p4"])["me"]["can_leave_will"] is True
+    assert room.leave_will("p4", "P2는 믿어도 됩니다") is None
+    assert room.case_log[-1] == "마지막 유언 — P4: P2는 믿어도 됩니다"
+    assert room.leave_will("p4", "두 번째 유언") == "유언은 한 번만 남길 수 있습니다."
 
 
 def test_rematch_erases_previous_public_and_mafia_chat():

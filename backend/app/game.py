@@ -70,6 +70,7 @@ BOT_DEFENSE_LINES = [
     "근거 없이 표가 따라붙었습니다. 처음 지목한 사람을 확인해 주세요.",
 ]
 ALLOWED_REACTIONS = {"👀", "⚠️", "👍", "🤥", "❓", "🩸"}
+ALLOWED_READS = {"trust", "hold", "suspect"}
 MISSIONS = [
     "낮 토론에서 서로 다른 두 사람에게 질문하기",
     "첫 투표 전에 가장 의심스러운 사람을 공개 지목하기",
@@ -134,6 +135,16 @@ class Room:
         self.case_log: deque[str] = deque(maxlen=48)
         self.chat: deque[dict[str, str | int]] = deque(maxlen=40)
         self.reactions: deque[dict[str, str | int]] = deque(maxlen=20)
+        self.questions: deque[dict[str, str | int]] = deque(maxlen=24)
+        self.claims: deque[dict[str, str | int]] = deque(maxlen=36)
+        self.moments: deque[dict[str, str | int | None]] = deque(maxlen=48)
+        self.reads: dict[str, dict[str, str]] = {}
+        self.wills: dict[str, str] = {}
+        self.interrogation_order: list[str] = []
+        self.speaker_id: str | None = None
+        self.speaker_deadline = 0.0
+        self._speaker_index = -1
+        self.last_death_id: str | None = None
         self.pace = "quick"
         self._bot_marks: set[str] = set()
         self._bot_suspicions: dict[str, str] = {}
@@ -143,6 +154,22 @@ class Room:
     def _record(self, line: str) -> None:
         self.story.append(line)
         self.case_log.append(line)
+
+    def _moment(
+        self,
+        kind: str,
+        text: str,
+        actor: str | None = None,
+        target: str | None = None,
+    ) -> None:
+        self.moments.append({
+            "id": secrets.token_hex(4),
+            "kind": kind,
+            "text": text,
+            "actor": actor,
+            "target": target,
+            "round": self.round,
+        })
 
     def touch(self) -> None:
         self.last_activity = time.time()
@@ -349,6 +376,16 @@ class Room:
         self.case_log.clear()
         self.chat.clear()
         self.reactions.clear()
+        self.questions.clear()
+        self.claims.clear()
+        self.moments.clear()
+        self.reads.clear()
+        self.wills.clear()
+        self.interrogation_order.clear()
+        self.speaker_id = None
+        self.speaker_deadline = 0.0
+        self._speaker_index = -1
+        self.last_death_id = None
         self._record("도시에 검은 자정이 내렸습니다. 역할을 확인하세요.")
         self._bot_marks.clear()
         self._bot_suspicions.clear()
@@ -375,6 +412,16 @@ class Room:
         self.case_log.clear()
         self.chat.clear()
         self.reactions.clear()
+        self.questions.clear()
+        self.claims.clear()
+        self.moments.clear()
+        self.reads.clear()
+        self.wills.clear()
+        self.interrogation_order.clear()
+        self.speaker_id = None
+        self.speaker_deadline = 0.0
+        self._speaker_index = -1
+        self.last_death_id = None
         self._bot_marks.clear()
         self._bot_suspicions.clear()
         self._record("새 게임을 준비합니다. 모두 준비 버튼을 눌러주세요.")
@@ -434,6 +481,73 @@ class Room:
         )
         return None
 
+    def submit_read(self, pid: str, target_id: str, stance: str) -> str | None:
+        reader = self.players.get(pid)
+        target = self.players.get(target_id)
+        if self.phase != "day" or not reader or not reader.alive:
+            return "지금은 인물 판단을 기록할 수 없습니다."
+        if target_id != self.speaker_id or not target or not target.alive or target_id == pid:
+            return "현재 심문 중인 다른 참가자만 판단할 수 있습니다."
+        if stance not in ALLOWED_READS:
+            return "지원하지 않는 판단입니다."
+        self.reads.setdefault(pid, {})[f"{self.round}:{target_id}"] = stance
+        return None
+
+    def add_question(self, pid: str, raw: str) -> str | None:
+        asker = self.players.get(pid)
+        speaker = self.players.get(self.speaker_id or "")
+        text = " ".join(raw.strip().split())[:100]
+        now = time.time()
+        if self.phase != "day" or not asker or not asker.alive or not speaker:
+            return "지금은 심문 질문을 보낼 수 없습니다."
+        if asker.id == speaker.id:
+            return "발언자는 자신의 진술에 집중해 주세요."
+        if not text:
+            return None
+        if now - asker.last_chat_at < 1.2:
+            return "질문을 너무 빠르게 보내고 있습니다."
+        asker.last_chat_at = now
+        self.questions.append({
+            "id": secrets.token_hex(4), "from": asker.nick, "from_id": asker.id,
+            "speaker_id": speaker.id, "text": text, "round": self.round,
+            "at": int(now * 1000),
+        })
+        self.case_log.append(f"심문 질문 — {asker.nick} → {speaker.nick}: {text}")
+        return None
+
+    def add_claim(self, pid: str, raw: str) -> str | None:
+        speaker = self.players.get(pid)
+        text = " ".join(raw.strip().split())[:120]
+        if self.phase != "day" or not speaker or not speaker.alive or pid != self.speaker_id:
+            return "현재 발언자만 공식 진술을 남길 수 있습니다."
+        if not text:
+            return None
+        if any(item["round"] == self.round and item["speaker_id"] == pid for item in self.claims):
+            return "이번 심문에서는 공식 진술을 한 번만 봉인할 수 있습니다."
+        line = f"공식 진술 — {speaker.nick}: {text}"
+        self.claims.append({
+            "id": secrets.token_hex(4), "speaker_id": pid, "speaker": speaker.nick,
+            "text": text, "round": self.round, "at": int(time.time() * 1000),
+        })
+        self.case_log.append(line)
+        self._moment("claim", line, actor=pid)
+        return None
+
+    def leave_will(self, pid: str, raw: str) -> str | None:
+        player = self.players.get(pid)
+        text = " ".join(raw.strip().split())[:120]
+        if self.phase != "dawn" or not player or player.alive or pid != self.last_death_id:
+            return "지금은 유언을 남길 수 없습니다."
+        if pid in self.wills:
+            return "유언은 한 번만 남길 수 있습니다."
+        if not text:
+            return None
+        self.wills[pid] = text
+        line = f"마지막 유언 — {player.nick}: {text}"
+        self._record(line)
+        self._moment("will", line, actor=pid)
+        return None
+
     def add_chat(self, pid: str, raw: str) -> str | None:
         player = self.players.get(pid)
         text = " ".join(raw.strip().split())[:160]
@@ -450,7 +564,13 @@ class Room:
             if player.id != self.accused_id or not player.alive:
                 return "최후 변론 중에는 피고인만 말할 수 있습니다."
             visibility = "all"
-        elif self.phase in {"lobby", "day", "vote", "gameover"}:
+        elif self.phase == "day":
+            if self.speaker_id and player.id != self.speaker_id:
+                return "심문 중에는 현재 발언자만 진술할 수 있습니다. 질문함을 이용해 주세요."
+            if not player.alive:
+                return "사망자는 토론에 참여할 수 없습니다."
+            visibility = "all"
+        elif self.phase in {"lobby", "vote", "gameover"}:
             visibility = "all"
         else:
             return "지금은 대화할 수 없습니다."
@@ -466,6 +586,7 @@ class Room:
             if not self.connected_players and time.time() - self.last_activity > 300:
                 self.players.clear()
                 break
+            self._run_interrogation()
             self._run_bots()
             elapsed = time.time() - self.phase_started_at
             minimum = EARLY_ADVANCE_MINIMUM[self.pace].get(self.phase, 0)
@@ -493,8 +614,15 @@ class Room:
             self._resolve_night()
         elif self.phase == "dawn":
             self._record("낮이 되었습니다. 말의 모순을 찾아내세요.")
-            self._set_phase("day", self._seconds("day"))
+            alive_count = sum(
+                player.alive and player.role != "spectator"
+                for player in self.players.values()
+            )
+            self._set_phase("day", max(self._seconds("day"), alive_count * 12))
+            self._start_interrogation()
         elif self.phase == "day":
+            self.speaker_id = None
+            self.speaker_deadline = 0.0
             self.votes.clear()
             self._record("투표가 시작되었습니다. 가장 의심스러운 사람을 지목하세요.")
             self._set_phase("vote", self._seconds("vote"))
@@ -542,6 +670,45 @@ class Room:
         completed, total = self._decision_progress()
         return total > 0 and completed >= total
 
+    def _start_interrogation(self) -> None:
+        alive = [
+            player.id for player in self.players.values()
+            if player.alive and player.role != "spectator"
+        ]
+        if alive:
+            shift = (self.round - 1) % len(alive)
+            alive = alive[shift:] + alive[:shift]
+        self.interrogation_order = alive
+        self._speaker_index = -1
+        self._run_interrogation()
+
+    def _run_interrogation(self) -> None:
+        if self.phase != "day" or not self.interrogation_order:
+            return
+        duration = max(1.0, self.deadline - self.phase_started_at)
+        slot = duration / len(self.interrogation_order)
+        index = min(len(self.interrogation_order) - 1, int(
+            (time.time() - self.phase_started_at) / slot
+        ))
+        if index == self._speaker_index:
+            return
+        self._speaker_index = index
+        self.speaker_id = self.interrogation_order[index]
+        self.speaker_deadline = min(self.deadline, self.phase_started_at + (index + 1) * slot)
+        speaker = self.players.get(self.speaker_id)
+        if not speaker:
+            return
+        self.case_log.append(f"{speaker.nick}님의 공개 심문이 시작되었습니다.")
+        key = f"{self.round}:{speaker.id}"
+        for bot in (p for p in self.players.values() if p.is_bot and p.alive and p.id != speaker.id):
+            if bot.role == "mafia" and speaker.role == "mafia":
+                stance = "trust"
+            elif speaker.role == "mafia" and random.random() < 0.68:
+                stance = "suspect"
+            else:
+                stance = random.choice(["trust", "hold", "hold", "suspect"])
+            self.reads.setdefault(bot.id, {})[key] = stance
+
     def _run_bots(self) -> None:
         bots = [p for p in self.players.values() if p.is_bot and p.alive]
         alive = [p for p in self.players.values() if p.alive and p.role != "spectator"]
@@ -554,8 +721,10 @@ class Room:
                     targets = [p for p in targets if p.role != "mafia"]
                 if targets:
                     self.actions[bot.id] = random.choice(targets).id
-        elif self.phase == "day" and self.deadline - time.time() < self._seconds("day") - 5:
+        elif self.phase == "day" and time.time() - self.phase_started_at > 3:
             for bot in bots:
+                if bot.id != self.speaker_id:
+                    continue
                 mark = f"day:{self.round}:{bot.id}"
                 if mark not in self._bot_marks and random.random() < 0.22:
                     self._bot_marks.add(mark)
@@ -573,6 +742,16 @@ class Room:
                     )
                     self.chat.append({"id": secrets.token_hex(4), "from": bot.nick, "text": line,
                                       "visibility": "all", "at": int(time.time() * 1000)})
+                    if not any(item["round"] == self.round and item["speaker_id"] == bot.id for item in self.claims):
+                        claim = f"제 판단은 {target.nick}님을 우선 확인해야 한다는 것입니다." if target else line
+                        self.claims.append({
+                            "id": secrets.token_hex(4), "speaker_id": bot.id,
+                            "speaker": bot.nick, "text": claim, "round": self.round,
+                            "at": int(time.time() * 1000),
+                        })
+                        line = f"공식 진술 — {bot.nick}: {claim}"
+                        self.case_log.append(line)
+                        self._moment("claim", line, actor=bot.id)
         elif self.phase == "vote":
             for bot in bots:
                 if bot.id not in self.votes:
@@ -602,6 +781,7 @@ class Room:
                 self.judgements[bot.id] = random.random() < 0.58
 
     def _resolve_night(self) -> None:
+        self.last_death_id = None
         mafia_targets = [
             target for actor_id, target in self.actions.items()
             if self.players.get(actor_id) and self.players[actor_id].role == "mafia"
@@ -630,15 +810,25 @@ class Room:
         if victim_id and victim_id != saved_id and guarding and guarding[0] in self.players:
             guard = self.players[guarding[0]]
             guard.alive = False
-            self._record(f"{guard.nick}님이 누군가를 지키다 대신 죽었습니다.")
+            self.last_death_id = guard.id
+            line = f"{guard.nick}님이 누군가를 지키다 대신 죽었습니다."
+            self._record(line)
+            self._moment("death", line, target=guard.id)
         elif victim_id and victim_id != saved_id and victim_id in self.players:
             victim = self.players[victim_id]
             victim.alive = False
-            self._record(f"{victim.nick}님이 죽었습니다.")
+            self.last_death_id = victim.id
+            line = f"{victim.nick}님이 죽었습니다."
+            self._record(line)
+            self._moment("death", line, target=victim.id)
         elif victim_id and victim_id == saved_id:
-            self._record("누군가 습격받았지만 의사의 치료로 살아남았습니다.")
+            line = "누군가 습격받았지만 의사의 치료로 살아남았습니다."
+            self._record(line)
+            self._moment("rescue", line)
         else:
-            self._record("밤은 조용히 지나갔습니다. 아무도 희생되지 않았습니다.")
+            line = "밤은 조용히 지나갔습니다. 아무도 희생되지 않았습니다."
+            self._record(line)
+            self._moment("dawn", line)
 
         if not self._check_win():
             self._set_phase("dawn", self._seconds("dawn"))
@@ -651,12 +841,16 @@ class Room:
             if len(ordered) == 1 or ordered[0][1] > ordered[1][1]:
                 accused = self.players.get(ordered[0][0])
         if not accused:
-            self._record("표가 갈렸습니다. 최종 피고 없이 오늘의 투표를 종료합니다.")
+            line = "표가 갈렸습니다. 최종 피고 없이 오늘의 투표를 종료합니다."
+            self._record(line)
+            self._moment("vote", line)
             self._set_phase("result", self._seconds("result"))
             return
         self.accused_id = accused.id
         self.judgements.clear()
-        self._record(f"{accused.nick}님이 최종 피고로 지목되었습니다. 최후 변론을 시작합니다.")
+        line = f"{accused.nick}님이 최종 피고로 지목되었습니다. 최후 변론을 시작합니다."
+        self._record(line)
+        self._moment("accused", line, target=accused.id)
         self._set_phase("defense", self._seconds("defense"))
 
     def _resolve_verdict(self) -> None:
@@ -670,20 +864,24 @@ class Room:
         if execute_votes > spare_votes:
             accused.alive = False
             role_name = ROLE_NAMES.get(accused.role, accused.role)
-            self._record(
+            line = (
                 f"최종 판결 {execute_votes} 대 {spare_votes}. {accused.nick}님이 처형되었습니다. "
                 f"정체는 {role_name}였습니다."
             )
+            self._record(line)
+            self._moment("execution", line, target=accused.id)
             if accused.role == "trickster":
-                self._record("모두가 광대의 연기에 속았습니다. 광대 단독 승리!")
+                line = "모두가 광대의 연기에 속았습니다. 광대 단독 승리!"
+                self._record(line)
+                self._moment("victory", line, actor=accused.id)
                 self._finish("trickster")
                 return
             if self._check_win():
                 return
         else:
-            self._record(
-                f"최종 판결 {execute_votes} 대 {spare_votes}. {accused.nick}님은 석방되었습니다."
-            )
+            line = f"최종 판결 {execute_votes} 대 {spare_votes}. {accused.nick}님은 석방되었습니다."
+            self._record(line)
+            self._moment("spared", line, target=accused.id)
         self._set_phase("result", self._seconds("result"))
 
     def _check_win(self) -> bool:
@@ -698,6 +896,7 @@ class Room:
             winner = "mafia"
             self._record("마피아 팀 승리! 도시는 완전히 장악되었습니다.")
         if winner:
+            self._moment("victory", self.case_log[-1])
             self._finish(winner)
             return True
         return False
@@ -714,6 +913,12 @@ class Room:
                 p.score += 20
             if p.role == "detective":
                 p.score += min(len(p.intel), 5) * 5
+            for key, stance in self.reads.get(p.id, {}).items():
+                target = self.players.get(key.split(":", 1)[-1])
+                if target and ((stance == "suspect" and target.role == "mafia") or (
+                    stance == "trust" and target.role not in {"mafia", "trickster"}
+                )):
+                    p.score += 3
         self._set_phase("gameover", 0)
         if not any(player.coders_id is not None for player in self.players.values()):
             return
@@ -758,6 +963,9 @@ class Room:
             }
             return tips.get(viewer.role, "밤이 끝날 때까지 다른 사람의 행동을 기다리세요.")
         if self.phase == "day":
+            speaker = self.players.get(self.speaker_id or "")
+            if speaker:
+                return f"현재 {speaker.nick}님의 공개 심문입니다. 발언자는 핵심 주장을 봉인하고, 나머지는 질문과 개인 판단을 남기세요."
             if viewer.intel:
                 return f"최근 조사 기록: {viewer.intel[-1]} 공개할지, 한 턴 더 숨길지 판단하세요."
             return "한 사람을 몰아가기보다 각자 ‘어젯밤 누구를 선택했는지’ 물어보면 모순을 찾기 쉽습니다."
@@ -789,6 +997,24 @@ class Room:
             if viewer.role == "mafia" and p.role == "mafia"
         ]
         decision_completed, decision_total = self._decision_progress()
+        current_reads = {
+            key.split(":", 1)[1]: stance
+            for key, stance in self.reads.get(viewer.id, {}).items()
+            if key.startswith(f"{self.round}:")
+        }
+        show_read_summary = self.phase in {"vote", "defense", "verdict", "result", "gameover"}
+        read_summary: dict[str, dict[str, int]] = {}
+        if show_read_summary:
+            for target in self.players.values():
+                counts = Counter(
+                    choices.get(f"{self.round}:{target.id}")
+                    for choices in self.reads.values()
+                )
+                read_summary[target.id] = {
+                    "trust": counts["trust"],
+                    "hold": counts["hold"],
+                    "suspect": counts["suspect"],
+                }
         return {
             "t": "state",
             "room": self.name,
@@ -825,6 +1051,11 @@ class Room:
                 "judgement": self.judgements.get(viewer.id),
                 "intel": viewer.intel[-4:],
                 "mission": viewer.mission,
+                "reads": current_reads,
+                "can_leave_will": (
+                    self.phase == "dawn" and viewer.id == self.last_death_id
+                    and viewer.id not in self.wills
+                ),
             },
             "accused_id": self.accused_id,
             "judgement_counts": {
@@ -840,6 +1071,16 @@ class Room:
             "guide": self._guide_for(viewer),
             "chat": visible_chat[-30:],
             "reactions": recent_reactions,
+            "speaker_id": self.speaker_id,
+            "speaker_deadline": round(self.speaker_deadline * 1000),
+            "interrogation_order": self.interrogation_order,
+            "questions": [
+                item for item in self.questions
+                if item["round"] == self.round and item["speaker_id"] == self.speaker_id
+            ][-5:],
+            "claims": list(self.claims)[-12:],
+            "read_summary": read_summary,
+            "moments": list(self.moments) if self.phase == "gameover" else list(self.moments)[-6:],
         }
 
     async def broadcast(self) -> None:
