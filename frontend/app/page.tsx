@@ -91,6 +91,20 @@ const TUTORIAL_SCENES = [
   { tag: "SCENE 05 · 복기", title: "모든 거짓말은 사건 파일에 남습니다", copy: "게임이 끝나면 역할과 전체 사건 기록을 되짚어 보세요. 다음 판에는 같은 거짓말이 통하지 않을 겁니다.", icon: BookOpen },
 ];
 
+const LANDING_SCENES = [
+  { tag: "NIGHT 01", title: "밤이 되었습니다", copy: "마피아가 움직이고 있습니다. 능력을 봉인하세요.", icon: Moon, tone: "night" },
+  { tag: "INTERROGATION", title: "공개 심문 진행 중", copy: "한 사람의 진술을 듣고 신뢰 또는 의심을 기록합니다.", icon: Radio, tone: "interrogation" },
+  { tag: "CITY VOTE", title: "도시가 선택합니다", copy: "모든 말이 한 표의 책임으로 돌아오는 순간입니다.", icon: Gavel, tone: "vote" },
+  { tag: "CASE REVEAL", title: "거짓말이 드러납니다", copy: "게임이 끝나면 결정적 주장과 선택을 다시 확인합니다.", icon: Eye, tone: "reveal" },
+] as const;
+
+const LANDING_ROLES = [
+  { code: "ROLE 01", name: "마피아", tagline: "밤의 살인자", copy: "낮에는 가장 믿을 만한 시민처럼 말해야 합니다.", avatar: 2 },
+  { code: "ROLE 02", name: "탐정", tagline: "진실의 추적자", copy: "확실한 조사 결과도 공개 시점을 잘못 고르면 표적이 됩니다.", avatar: 5 },
+  { code: "ROLE 03", name: "광대", tagline: "처형을 원하는 자", copy: "수상해 보여야 하지만 마피아에게 먼저 죽어서는 안 됩니다.", avatar: 10 },
+  { code: "ROLE 04", name: "시민", tagline: "말을 쫓는 증인", copy: "능력 대신 질문과 기록으로 거짓말의 모순을 찾습니다.", avatar: 8 },
+] as const;
+
 function makeRoom() {
   const left = ["silent", "black", "hidden", "last", "red"];
   const right = ["moon", "alley", "hotel", "signal", "midnight"];
@@ -130,6 +144,9 @@ export default function GamePage() {
   const [notice, setNotice] = useState("");
   const [now, setNow] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [invitedByLink, setInvitedByLink] = useState(false);
+  const [landingScene, setLandingScene] = useState(0);
+  const [landingRole, setLandingRole] = useState(0);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [stats, setStats] = useState<LocalStats>({ games: 0, wins: 0, streak: 0 });
   const [tutorialOpen, setTutorialOpen] = useState(false);
@@ -169,6 +186,7 @@ export default function GamePage() {
     queueMicrotask(() => {
       if (!mounted) return;
       setRoomInput(params.get("room") || makeRoom());
+      setInvitedByLink(Boolean(params.get("room")));
       setNick(localStorage.getItem("black-midnight:nick") || "");
       const savedStats = localStorage.getItem("black-midnight:stats");
       if (savedStats) {
@@ -189,6 +207,15 @@ export default function GamePage() {
       window.removeEventListener("beforeinstallprompt", onInstall);
     };
   }, []);
+
+  useEffect(() => {
+    if (joined) return;
+    const timer = window.setInterval(() => {
+      setLandingScene((current) => (current + 1) % LANDING_SCENES.length);
+      setLandingRole((current) => (current + 1) % LANDING_ROLES.length);
+    }, 4200);
+    return () => window.clearInterval(timer);
+  }, [joined]);
 
   useEffect(() => {
     let active = true;
@@ -689,10 +716,20 @@ export default function GamePage() {
     setNotice("전체 사건 기록을 복사했습니다.");
   };
 
+  const focusJoinCard = () => {
+    document.querySelector<HTMLElement>(".join-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => document.querySelector<HTMLInputElement>("#landing-nick")?.focus(), 480);
+  };
+
+  const landingSceneMeta = LANDING_SCENES[landingScene];
+  const LandingSceneIcon = landingSceneMeta.icon;
+  const landingRoleMeta = LANDING_ROLES[landingRole];
+
   if (!joined) {
     return (
       <main className="landing-shell">
         <div className="grain" />
+        <div className="landing-atmosphere" aria-hidden="true"><i /><i /><i /><span /></div>
         <header className="landing-nav"><div><Moon size={17} fill="currentColor" /><b>검은 자정</b></div><span><i />CITY NETWORK ONLINE{networkStatus ? ` · ${networkStatus.players}명 접속 · ${networkStatus.active_matches}건 진행` : ""}</span></header>
         <div className="city-coordinate"><span>37°34&apos;N · 126°58&apos;E</span><b>MIDNIGHT DISTRICT / LIVE FEED 00:42</b></div>
         <section className="landing-copy">
@@ -700,30 +737,40 @@ export default function GamePage() {
           <h1><span>검은</span> <em>자정</em></h1>
           <p className="hero-line">이 도시의 누군가는 마피아다.</p>
           <div className="mafia-warning"><Skull size={18} /><span><b>WHO IS LYING?</b><small>정체를 감추고, 거짓말을 찾아, 자정까지 살아남아라.</small></span><i>CASE 00</i></div>
-          <div className="role-strip">
-            <div className="landing-role role-mafia-card"><div className="role-face avatar-photo avatar-2" /><span><small>ROLE 01</small><b>마피아</b><em>밤의 살인자</em></span></div>
-            <div className="landing-role"><div className="role-face avatar-photo avatar-5" /><span><small>ROLE 02</small><b>탐정</b><em>진실의 추적자</em></span></div>
-            <div className="landing-role"><div className="role-face avatar-photo avatar-8" /><span><small>ROLE 03</small><b>시민</b><em>표적 또는 증인</em></span></div>
+          <div key={landingSceneMeta.tag} className={`landing-live-case tone-${landingSceneMeta.tone}`} aria-live="polite">
+            <div className="live-case-visual"><LandingSceneIcon size={23} /><span><i />LIVE CASE</span></div>
+            <div className="live-case-copy"><small>{landingSceneMeta.tag}</small><b>{landingSceneMeta.title}</b><p>{landingSceneMeta.copy}</p></div>
+            <div className="live-case-steps">{LANDING_SCENES.map((scene, index) => <button key={scene.tag} className={index === landingScene ? "active" : ""} onClick={() => setLandingScene(index)} aria-label={`${scene.title} 미리보기`}><i /></button>)}</div>
           </div>
+          <div className="role-selector">
+            <div className="role-strip">{LANDING_ROLES.map((item, index) => <button type="button" key={item.code} className={`landing-role ${index === landingRole ? "active" : ""}`} onClick={() => setLandingRole(index)}><div className={`role-face avatar-photo avatar-${item.avatar}`} /><span><small>{item.code}</small><b>{item.name}</b><em>{item.tagline}</em></span></button>)}</div>
+            <div className="role-whisper"><span>{landingRoleMeta.name} 생존 전략</span><p>{landingRoleMeta.copy}</p></div>
+          </div>
+          <button className="hero-join-cta" type="button" onClick={focusJoinCard}><span><b>{invitedByLink ? "초대받은 사건에 합류" : "30초 만에 사건 시작"}</b><small>이름만 정하면 설치 없이 바로 입장합니다</small></span><ChevronRight size={18} /></button>
           <div className="local-stats"><div><b>{stats.games}</b><span>플레이</span></div><div><b>{stats.wins}</b><span>승리</span></div><div><b>{stats.streak}</b><span>연승</span></div></div>
           <button className="ranking-launch" type="button" onClick={() => setRankingOpen(true)}><Trophy size={16} /><span><b>명예의 전당</b><small>{leaderboard[0] ? `현재 1위 ${leaderboard[0].name} · ${leaderboard[0].best_score}점` : "첫 번째 전설이 되어보세요"}</small></span><ChevronRight size={16} /></button>
           <button className="briefing-launch" type="button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}><Film size={16} /><span><b>30초 AI 시네마틱 브리핑</b><small>룰을 몰라도 한 번에 이해하기</small></span><ChevronRight size={16} /></button>
         </section>
         <section className="join-card">
+          <div className="join-scanline" />
           <div className="join-card-top">
             <span>PRIVATE TABLE</span>
             <span className="live-dot">온라인</span>
           </div>
-          <h2>테이블에 앉기</h2>
-          <p>설치 없이 링크 하나로 최대 12명이 함께합니다.</p>
+          {invitedByLink && <div className="invited-room"><UserPlus size={15} /><span><b>비밀 초대장이 도착했습니다</b><small>{roomInput} 사건의 자리가 확보되어 있습니다.</small></span></div>}
+          <div className="join-presence"><div><span className="avatar-photo avatar-1" /><span className="avatar-photo avatar-4" /><span className="avatar-photo avatar-7" /></div><p>{networkStatus ? <><b>{networkStatus.players}명</b>이 현재 도시 네트워크에 접속 중</> : <>실시간 도시 네트워크 연결 중</>}</p></div>
+          <h2>{invitedByLink ? "초대에 응답하기" : "테이블에 앉기"}</h2>
+          <p>이름을 정하고 방에 들어가세요. 역할은 입장 후 서버가 비밀리에 봉인합니다.</p>
+          <div className="join-steps"><span className="active"><b>01</b>이름 설정</span><i /><span><b>02</b>친구 합류</span><i /><span><b>03</b>역할 봉인</span></div>
           <div className="join-warning"><Skull size={14} /><span>입장 후 배역은 봉인됩니다. 아무도 믿지 마세요.</span></div>
           <form onSubmit={submitJoin}>
-            <label>당신의 이름<input value={nick} onChange={(e) => setNick(e.target.value)} placeholder="예: 수상한 철수" maxLength={16} autoFocus /></label>
-            <label>비밀 방 코드<div className="room-field"><input value={roomInput} onChange={(e) => setRoomInput(e.target.value)} maxLength={32} /><button type="button" onClick={() => setRoomInput(makeRoom())}><RotateCcw size={15} /></button></div></label>
-            <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim()}><LogIn size={18} /><span>용의자 명단에 입장</span></button>
+            <label><span>당신의 이름 <em>{nick.length}/16</em></span><input id="landing-nick" value={nick} onChange={(e) => setNick(e.target.value)} placeholder="게임에서 불릴 이름" maxLength={16} autoFocus /></label>
+            <label><span>비밀 방 코드 <em>{invitedByLink ? "초대 링크에서 확인됨" : "친구와 공유할 코드"}</em></span><div className="room-field"><input value={roomInput} onChange={(e) => { setRoomInput(e.target.value); setInvitedByLink(false); }} maxLength={32} /><button type="button" onClick={() => { setRoomInput(makeRoom()); setInvitedByLink(false); }} aria-label="새 방 코드 만들기"><RotateCcw size={15} /></button></div></label>
+            <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim()}><LogIn size={18} /><span>{nick.trim() ? `${nick.trim()}으로 사건 참가` : "이름을 입력하고 사건 참가"}</span><ChevronRight size={16} /></button>
           </form>
           {installPrompt && <button className="install-button" type="button" onClick={installApp}><Smartphone size={16} /> 홈 화면에 앱 설치</button>}
-          <div className="join-foot"><Users size={15} /> 최소 4명 · AI 채우기 지원 · 모바일 설치 가능</div>
+          <div className="join-proof"><span><Check size={12} />설치 없음</span><span><Check size={12} />AI 인원 채우기</span><span><Check size={12} />실시간 음성</span></div>
+          <div className="join-foot"><Users size={15} /> 최소 4명부터 시작 · 최대 12명 · 초보자 브리핑 제공</div>
         </section>
         {tutorialOpen && <TutorialModal step={tutorialStep} setStep={setTutorialStep} onClose={closeTutorial} />}
         {rankingOpen && <RankingModal entries={leaderboard} signedIn={Boolean(identity)} onClose={() => setRankingOpen(false)} />}
