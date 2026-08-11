@@ -21,6 +21,7 @@ export type ReadStance = "trust" | "hold" | "suspect";
 export type InterrogationQuestion = { id: string; from: string; from_id: string; speaker_id: string; text: string; round: number; at: number };
 export type SealedClaim = { id: string; speaker_id: string; speaker: string; text: string; round: number; at: number };
 export type CaseMoment = { id: string; kind: string; text: string; actor: string | null; target: string | null; round: number };
+export type BallotEntry = { voter_id: string; voter: string; target_id: string; target: string };
 
 export type GameState = {
   t: "state";
@@ -51,6 +52,7 @@ export type GameState = {
   accused_id: string | null;
   judgement_counts: { execute: number; spare: number };
   decision_progress: { completed: number; total: number };
+  ballot_feed: BallotEntry[];
   guide: string;
   chat: ChatMessage[];
   reactions: ReactionState[];

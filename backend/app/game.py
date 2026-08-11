@@ -565,8 +565,6 @@ class Room:
                 return "최후 변론 중에는 피고인만 말할 수 있습니다."
             visibility = "all"
         elif self.phase == "day":
-            if self.speaker_id and player.id != self.speaker_id:
-                return "심문 중에는 현재 발언자만 진술할 수 있습니다. 질문함을 이용해 주세요."
             if not player.alive:
                 return "사망자는 토론에 참여할 수 없습니다."
             visibility = "all"
@@ -863,10 +861,9 @@ class Room:
             return
         if execute_votes > spare_votes:
             accused.alive = False
-            role_name = ROLE_NAMES.get(accused.role, accused.role)
             line = (
                 f"최종 판결 {execute_votes} 대 {spare_votes}. {accused.nick}님이 처형되었습니다. "
-                f"정체는 {role_name}였습니다."
+                "정체는 사건이 끝날 때까지 공개되지 않습니다."
             )
             self._record(line)
             self._moment("execution", line, target=accused.id)
@@ -965,7 +962,7 @@ class Room:
         if self.phase == "day":
             speaker = self.players.get(self.speaker_id or "")
             if speaker:
-                return f"현재 {speaker.nick}님의 공개 심문입니다. 발언자는 핵심 주장을 봉인하고, 나머지는 질문과 개인 판단을 남기세요."
+                return f"자유 토론 중입니다. 현재 {speaker.nick}님이 집중 발언자이며, 모두 대화하면서 질문과 개인 판단을 남길 수 있습니다."
             if viewer.intel:
                 return f"최근 조사 기록: {viewer.intel[-1]} 공개할지, 한 턴 더 숨길지 판단하세요."
             return "한 사람을 몰아가기보다 각자 ‘어젯밤 누구를 선택했는지’ 물어보면 모순을 찾기 쉽습니다."
@@ -1003,6 +1000,7 @@ class Room:
             if key.startswith(f"{self.round}:")
         }
         show_read_summary = self.phase in {"vote", "defense", "verdict", "result", "gameover"}
+        show_ballot_feed = self.phase in {"vote", "defense", "verdict", "result", "gameover"}
         read_summary: dict[str, dict[str, int]] = {}
         if show_read_summary:
             for target in self.players.values():
@@ -1066,6 +1064,17 @@ class Room:
                 "completed": decision_completed,
                 "total": decision_total,
             },
+            "ballot_feed": [
+                {
+                    "voter_id": voter_id,
+                    "voter": self.players[voter_id].nick,
+                    "target_id": target_id,
+                    "target": self.players[target_id].nick,
+                }
+                for voter_id, target_id in self.votes.items()
+                if show_ballot_feed
+                and voter_id in self.players and target_id in self.players
+            ],
             "story": list(self.story),
             "case_log": list(self.case_log),
             "guide": self._guide_for(viewer),

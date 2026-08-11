@@ -64,7 +64,7 @@ def test_only_accused_can_speak_during_final_defense():
     assert room.chat[-1]["from"] == "P4"
 
 
-def test_execute_majority_reveals_role_and_moves_to_result():
+def test_execute_majority_hides_role_until_game_over_and_moves_to_result():
     room = room_with("mafia", "doctor", "detective", "citizen", "citizen", "citizen")
     room.phase = "verdict"
     room.accused_id = "p6"
@@ -74,7 +74,8 @@ def test_execute_majority_reveals_role_and_moves_to_result():
 
     assert room.players["p6"].alive is False
     assert room.phase == "result"
-    assert "정체는 시민" in room.case_log[-1]
+    assert "사건이 끝날 때까지 공개되지 않습니다" in room.case_log[-1]
+    assert room._state_for(room.players["p1"])["players"][-1]["role"] is None
 
 
 def test_tie_in_final_judgement_spares_accused():
@@ -250,6 +251,35 @@ def test_day_interrogation_records_claim_questions_and_private_reads():
     room.phase = "vote"
     summary = room._state_for(room.players["p2"])["read_summary"]
     assert summary["p1"]["suspect"] == 1
+
+
+def test_day_discussion_allows_every_living_player_to_talk_while_spotlight_rotates():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.round = 1
+    room.phase = "day"
+    room.phase_started_at = time.time()
+    room.deadline = room.phase_started_at + 96
+    room._start_interrogation()
+
+    assert room.speaker_id == "p1"
+    assert room.add_chat("p2", "저도 공개 토론에 참여합니다") is None
+    assert room.chat[-1]["from"] == "P2"
+    room.players["p4"].alive = False
+    assert "사망자" in room.add_chat("p4", "유령 발언")
+
+
+def test_ballot_feed_is_public_during_trial_and_persists_through_result():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.phase = "vote"
+    room.votes = {"p1": "p4", "p2": "p4", "p3": "p1"}
+
+    state = room._state_for(room.players["p2"])
+    assert state["ballot_feed"][0] == {
+        "voter_id": "p1", "voter": "P1", "target_id": "p4", "target": "P4"
+    }
+    room._resolve_vote()
+    assert room.phase == "defense"
+    assert len(room._state_for(room.players["p2"])["ballot_feed"]) == 3
 
 
 def test_night_victim_can_leave_one_public_will_at_dawn():

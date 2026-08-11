@@ -36,11 +36,11 @@ const PHASE_META = {
   reveal: ["역할 확인", "당신의 정체는 오직 당신만 볼 수 있습니다."],
   night: ["밤", "고개를 숙이고 자신의 행동을 선택하세요."],
   dawn: ["새벽", "밤사이 도시에 무슨 일이 있었을까요?"],
-  day: ["낮 · 토론", "대화 속 모순을 찾아 마피아를 추리하세요."],
+  day: ["낮 · 자유 토론", "모두 대화하되 현재 집중 발언자의 주장을 놓치지 마세요."],
   vote: ["시민 투표", "가장 의심스러운 한 사람을 지목하세요."],
   defense: ["최후 변론", "지목된 용의자의 마지막 진술을 들으세요."],
   verdict: ["최종 판결", "변론을 들었다면 처형 또는 석방을 결정하세요."],
-  result: ["투표 결과", "도시의 선택이 공개됩니다."],
+  result: ["투표 결과", "도시의 선택은 공개되지만 정체는 아직 비밀입니다."],
   gameover: ["게임 종료", "승패가 결정되었습니다."],
 } as const;
 
@@ -49,11 +49,11 @@ const PHASE_ALERT_META: Record<GameState["phase"], { kicker: string; title: stri
   reveal: { kicker: "IDENTITY REVEALED", title: "배역이 공개되었습니다", copy: "이 정체는 오직 당신만 볼 수 있습니다.", icon: ShieldQuestion },
   night: { kicker: "NIGHT HAS FALLEN", title: "밤이 되었습니다", copy: "말을 멈추고 자신의 능력을 선택하세요.", icon: Moon },
   dawn: { kicker: "DAWN REPORT", title: "새벽이 밝았습니다", copy: "밤사이 벌어진 사건이 곧 공개됩니다.", icon: Eye },
-  day: { kicker: "OPEN DISCUSSION", title: "토론이 시작되었습니다", copy: "주장의 모순을 찾고 가장 수상한 사람을 추리하세요.", icon: MessageCircle },
+  day: { kicker: "OPEN DISCUSSION", title: "자유 토론이 시작됩니다", copy: "모두 발언할 수 있습니다. 집중 발언자의 주장과 반박을 비교하세요.", icon: MessageCircle },
   vote: { kicker: "FINAL BALLOT", title: "시민 투표가 시작됩니다", copy: "처형할 용의자 한 명을 선택하세요.", icon: Vote },
   defense: { kicker: "FINAL DEFENSE", title: "최후 변론이 시작됩니다", copy: "피고에게만 마지막 발언권이 주어집니다.", icon: MessageCircle },
   verdict: { kicker: "CITY VERDICT", title: "최종 판결을 내려주세요", copy: "처형 또는 석방. 이제 도시가 결정합니다.", icon: Gavel },
-  result: { kicker: "VERDICT", title: "판결을 집행합니다", copy: "도시의 선택과 정체가 공개됩니다.", icon: Skull },
+  result: { kicker: "VERDICT", title: "판결을 집행합니다", copy: "처형 결과만 공개됩니다. 정체는 사건 종료까지 비밀입니다.", icon: Skull },
   gameover: { kicker: "CASE CLOSED", title: "사건이 종료되었습니다", copy: "승리 팀과 모든 배역을 확인하세요.", icon: Sparkles },
 };
 
@@ -62,7 +62,7 @@ const PHASE_NARRATION: Record<GameState["phase"], string> = {
   reveal: "배역이 공개되었습니다. 자신의 정체를 확인하세요.",
   night: "밤이 되었습니다. 모두 눈을 감으세요.",
   dawn: "새벽 사건 보고입니다.",
-  day: "토론을 시작합니다.",
+  day: "자유 토론을 시작합니다. 모든 생존자에게 발언권이 열립니다.",
   vote: "시민 투표를 시작합니다.",
   defense: "최후 변론을 시작합니다.",
   verdict: "처형 또는 석방을 결정하세요.",
@@ -85,7 +85,7 @@ type AudioWindow = Window & typeof globalThis & { webkitAudioContext?: typeof Au
 
 const TUTORIAL_SCENES = [
   { tag: "SCENE 01 · 정체", title: "밤에는 역할이 움직입니다", copy: "마피아는 습격하고, 의사와 경호원은 누군가를 지키며, 탐정은 단 한 명의 진실을 확인합니다.", icon: Moon },
-  { tag: "SCENE 02 · 심문", title: "낮에는 말이 증거입니다", copy: "모든 생존자에게 순서대로 발언권이 열립니다. 질문을 보내고 신뢰·보류·의심을 비공개로 기록한 뒤 투표 전에 판단 결과를 확인하세요.", icon: MessageCircle },
+  { tag: "SCENE 02 · 토론", title: "낮에는 말이 증거입니다", copy: "모두 자유롭게 대화하면서 순서대로 바뀌는 집중 발언자의 주장을 확인하세요. 질문과 신뢰·보류·의심 판단은 투표 전에 근거로 공개됩니다.", icon: MessageCircle },
   { tag: "SCENE 03 · 반전", title: "수상하다고 모두 마피아는 아닙니다", copy: "광대는 시민 투표로 처형되면 혼자 승리합니다. 표를 던지기 전 동기와 행동 결과를 함께 확인하세요.", icon: Sparkles },
   { tag: "SCENE 04 · 재판", title: "지목은 곧 처형이 아닙니다", copy: "가장 많은 표를 받은 피고에게 최후 변론이 주어집니다. 진술을 들은 생존자들이 처형 또는 석방을 최종 결정합니다.", icon: Gavel },
   { tag: "SCENE 05 · 복기", title: "모든 거짓말은 사건 파일에 남습니다", copy: "게임이 끝나면 역할과 전체 사건 기록을 되짚어 보세요. 다음 판에는 같은 거짓말이 통하지 않을 겁니다.", icon: BookOpen },
@@ -173,8 +173,7 @@ export default function GamePage() {
   const countdownRemaining = game ? secondsLeft(game.deadline, now) : 0;
   const narrationText = game && soundPhase ? phaseNarration(game, soundPhase) : "";
   const voiceCanSpeak = Boolean(game?.me.alive && (
-    ["lobby", "vote", "gameover"].includes(game.phase)
-    || (game.phase === "day" && game.me.id === game.speaker_id)
+    ["lobby", "day", "vote", "gameover"].includes(game.phase)
     || (game.phase === "defense" && game.me.id === game.accused_id)
   ));
   const voicePeerKey = game?.players.filter((player) => player.voice && !player.bot && player.id !== game.me.id).map((player) => player.id).sort().join("|") ?? "";
@@ -384,6 +383,7 @@ export default function GamePage() {
             players: next.players.map((player) => ({ ...player, score: player.score ?? 0, voice: player.voice ?? false })),
             accused_id: next.accused_id ?? null,
             judgement_counts: next.judgement_counts ?? { execute: 0, spare: 0 },
+            ballot_feed: next.ballot_feed ?? [],
             decision_progress: next.decision_progress ?? { completed: 0, total: 0 },
             case_log: next.case_log ?? next.story ?? [],
             reactions: next.reactions ?? [],
@@ -463,7 +463,7 @@ export default function GamePage() {
   const isCurrentSpeaker = Boolean(game && game.me.id === game.speaker_id);
   const speakerRemaining = game ? secondsLeft(game.speaker_deadline, now) : 0;
   const canChat = Boolean(game && ["lobby", "vote", "gameover"].includes(game.phase)
-    || game?.phase === "day" && isCurrentSpeaker && game.me.alive
+    || game?.phase === "day" && game.me.alive
     || game?.phase === "defense" && isAccused && game.me.alive
     || game?.phase === "night" && role === "mafia" && game.me.alive);
   const canReact = Boolean(game && ["day", "vote", "defense", "verdict", "gameover"].includes(game.phase));
@@ -486,7 +486,7 @@ export default function GamePage() {
   const currentDirective = !game || game.phase === "lobby" ? "용의자를 모으고 모두 준비 상태인지 확인하세요."
     : game.phase === "reveal" ? roleMeta.goal
     : game.phase === "night" ? (["mafia", "doctor", "detective", "bodyguard"].includes(role) ? roleMeta.power : "침묵을 유지하고 아침의 사건 보고를 기다리세요.")
-    : game.phase === "day" ? "발언의 모순을 추리 보드에 표시하고 직접 질문하세요."
+    : game.phase === "day" ? "모두 자유롭게 토론합니다. 집중 발언자의 모순은 질문함과 추리 보드에 따로 기록하세요."
     : game.phase === "vote" ? "개인 기록과 공개 발언을 대조한 뒤 최종 표를 봉인하세요."
     : game.phase === "defense" ? (isAccused ? "당신의 마지막 변론입니다. 행동과 주장을 명확히 설명하세요." : "피고의 마지막 진술에서 모순을 찾으세요.")
     : game.phase === "verdict" ? (isAccused ? "도시의 최종 결정을 기다리세요." : "감정이 아닌 발언과 사건 기록을 근거로 판결하세요.")
@@ -841,10 +841,10 @@ export default function GamePage() {
             </div>
           )}
           {game.phase === "day" && currentSpeaker && (
-            <section className="interrogation-stage" aria-label="공개 심문">
+            <section className="interrogation-stage" aria-label="자유 토론 집중 발언">
               <div className={`interrogation-photo avatar-photo avatar-${Math.max(0, currentSpeakerIndex) % 12}`}><span>ON AIR</span></div>
               <div className="interrogation-main">
-                <div className="interrogation-heading"><span>PUBLIC INTERROGATION · ROUND {game.round}</span><b>{currentSpeaker.n}님의 공개 진술</b><em>{speakerRemaining}초</em></div>
+                <div className="interrogation-heading"><span>OPEN DISCUSSION · ROUND {game.round}</span><b>{currentSpeaker.n}님 집중 발언</b><em>{speakerRemaining}초</em></div>
                 <div className="speaker-order">{game.interrogation_order.map((id, index) => { const player = game.players.find((item) => item.id === id); return <span key={id} className={id === game.speaker_id ? "active" : ""}>{index + 1}. {player?.n ?? "?"}</span>; })}</div>
                 <div className="question-feed">{game.questions.length === 0 ? <p>아직 도착한 질문이 없습니다. 발언의 모순을 구체적으로 질문하세요.</p> : game.questions.map((question) => <p key={question.id}><b>{question.from}</b><span>{question.text}</span></p>)}</div>
                 {isCurrentSpeaker ? (
@@ -860,6 +860,12 @@ export default function GamePage() {
           )}
           {game.phase === "vote" && Object.keys(game.read_summary).length > 0 && (
             <section className="read-summary-panel"><header><Search size={16} /><span><b>심문 사전 판단 공개</b><small>투표 전까지 비공개였던 신뢰·의심 기록입니다. 다수의 판단이 진실을 보장하지는 않습니다.</small></span></header><div>{game.players.filter((player) => player.alive).map((player) => { const summary = game.read_summary[player.id] ?? { trust: 0, hold: 0, suspect: 0 }; return <article key={player.id}><b>{player.n}</b><span className="trust">신뢰 {summary.trust}</span><span>보류 {summary.hold}</span><span className="suspect">의심 {summary.suspect}</span></article>; })}</div></section>
+          )}
+          {["vote", "defense", "verdict", "result"].includes(game.phase) && (
+            <section className="ballot-call" aria-live="polite">
+              <header><Vote size={16} /><span><b>공개 투표 호명</b><small>{game.phase === "vote" ? `봉인 완료 ${game.decision_progress.completed}/${game.decision_progress.total}` : "최후 변론에 오른 표의 흐름"}</small></span></header>
+              <div>{game.ballot_feed.length ? game.ballot_feed.map((entry, index) => <article key={entry.voter_id}><em>{String(index + 1).padStart(2, "0")}</em><b>{entry.voter}</b><ChevronRight size={12} /><span>{entry.target}</span></article>) : <p>첫 번째 표가 봉인되기를 기다리고 있습니다.</p>}</div>
+            </section>
           )}
           {game.phase === "gameover" && game.moments.length > 0 && (
             <section className="replay-panel"><header><Film size={17} /><span><b>결정적 장면 리플레이</b><small>주장과 판결이 어떻게 승부를 바꿨는지 시간순으로 복기합니다.</small></span></header><div>{game.moments.slice(-8).map((moment, index) => <article key={moment.id}><span>{String(index + 1).padStart(2, "0")}</span><div><small>{moment.kind.toUpperCase()} · DAY {moment.round}</small><p>{moment.text}</p></div></article>)}</div></section>
@@ -890,7 +896,7 @@ export default function GamePage() {
             )}
             {game.phase === "night" && (!game.me.alive || role === "citizen") && <div><b>도시가 잠들었습니다</b><span>{game.me.alive ? "아침이 올 때까지 눈을 감고 기다리세요." : "남은 플레이어들의 밤을 지켜보고 있습니다."}</span></div>}
             {game.phase === "vote" && game.me.alive && <><div><b>처형할 사람을 선택하세요</b><span>투표 완료 {game.decision_progress.completed}/{game.decision_progress.total} · 모두 투표하면 자동 마감됩니다.</span></div><button className="danger-button seal-button" disabled={!selected} onClick={() => commitDecision("vote")}><LockKeyhole size={17} />{game.me.vote_target ? "투표 변경" : "투표 봉인"}</button></>}
-            {game.phase === "day" && <div><b>{isCurrentSpeaker ? "당신의 공개 심문" : `${currentSpeaker?.n ?? "다음 참가자"}님의 공개 심문`}</b><span>{isCurrentSpeaker ? "음성과 채팅 발언권이 열렸습니다. 핵심 주장을 봉인하세요." : "질문을 보내고 신뢰·보류·의심 중 하나를 비공개로 기록하세요."}</span></div>}
+            {game.phase === "day" && <div><b>{isCurrentSpeaker ? "당신이 현재 집중 발언자입니다" : `${currentSpeaker?.n ?? "다음 참가자"}님 집중 발언 중`}</b><span>{isCurrentSpeaker ? "모두 들을 수 있습니다. 핵심 주장을 봉인하세요." : "자유롭게 반박하면서 질문과 개인 판단도 따로 기록하세요."}</span></div>}
             {game.phase === "dawn" && game.me.can_leave_will && <form className="will-form" onSubmit={submitWill}><div><b>마지막 유언 1회</b><span>다음 토론에 남길 마지막 단서를 작성하세요.</span></div><input value={willText} onChange={(event) => setWillText(event.target.value)} maxLength={120} placeholder="마지막으로 시민에게 남길 말" /><button className="danger-button" disabled={!willText.trim()}><Skull size={16} />유언 공개</button></form>}
             {game.phase === "defense" && <div><b>{isAccused ? "당신의 최후 변론" : `${accusedPlayer?.n ?? "피고"}의 최후 변론`}</b><span>{isAccused ? "채팅창에서 마지막 진술을 남기세요." : "지금은 피고만 발언할 수 있습니다."}</span></div>}
             {game.phase === "verdict" && game.me.alive && !isAccused && <><div><b>도시의 최종 판결</b><span>판결 완료 {game.decision_progress.completed}/{game.decision_progress.total} · 모두 결정하면 자동 집행됩니다.</span></div><button className={game.me.judgement === false ? "secondary-button judgement-selected" : "secondary-button"} aria-pressed={game.me.judgement === false} onClick={() => commitJudgement(false)}><ShieldCheck size={17} />석방</button><button className={game.me.judgement === true ? "danger-button judgement-selected" : "danger-button"} aria-pressed={game.me.judgement === true} onClick={() => commitJudgement(true)}><Gavel size={17} />처형</button></>}
@@ -910,7 +916,7 @@ export default function GamePage() {
                 <button className={voiceChatOn ? "leave" : "join"} onClick={() => void toggleVoiceChat()}>{voiceChatOn ? <><PhoneOff size={14} />나가기</> : <><Mic size={14} />음성 참여</>}</button>
               </div>
             </div>
-            <div className="chat-title"><div><MessageCircle size={16} /><b>{game.phase === "night" && role === "mafia" ? "마피아 비밀 채팅" : game.phase === "day" ? "공개 진술 기록" : "테이블 대화"}</b></div><span>{canChat ? "대화 가능" : game.phase === "day" ? "발언권 대기" : "침묵 중"}</span></div>
+            <div className="chat-title"><div><MessageCircle size={16} /><b>{game.phase === "night" && role === "mafia" ? "마피아 비밀 채팅" : game.phase === "day" ? "자유 토론 채널" : "테이블 대화"}</b></div><span>{canChat ? (game.phase === "day" && isCurrentSpeaker ? "집중 발언 중" : "대화 가능") : "침묵 중"}</span></div>
             <div className="chat-scroll">{game.chat.length === 0 && <div className="empty-chat">아직 대화가 없습니다.</div>}{game.chat.map((msg) => <div className="chat-message" key={msg.id}><b>{msg.from}</b><p>{msg.text}</p></div>)}<div ref={chatEndRef} /></div>
             {canReact && <div className="reaction-dock" aria-label="빠른 리액션">{REACTION_EMOJIS.map((emoji) => <button key={emoji} onClick={() => send({ t: "react", emoji })} aria-label={`${emoji} 리액션 보내기`}>{emoji}</button>)}</div>}
             <form className="chat-form" onSubmit={submitChat}><input value={chatText} onChange={(e) => setChatText(e.target.value)} disabled={!canChat} placeholder={canChat ? (game.phase === "day" ? "발언 내용은 공개 기록으로 남습니다" : "메시지를 입력하세요") : game.phase === "day" ? "질문은 공개 심문 카드에서 보내세요" : "지금은 말할 수 없습니다"} maxLength={160} /><button disabled={!canChat || !chatText.trim()} aria-label="메시지 전송"><Send size={16} /></button></form>
