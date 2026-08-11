@@ -79,6 +79,14 @@ MISSIONS = [
     "투표가 끝나기 전 한 번은 기존 의견을 재검토하기",
 ]
 
+FORENSIC_CLUES = [
+    ("CCTV 음영 구역", "00:38~00:42 사이 복도 카메라에서 {suspects} 중 한 명의 동선이 끊겼습니다."),
+    ("미세 섬유 조각", "현장에서 발견된 짙은 섬유는 {suspects} 중 한 명의 외투에서 떨어졌을 가능성이 있습니다."),
+    ("복제된 키카드", "잠금 기록과 대조한 결과 {suspects} 중 한 명이 사용한 동선과 겹칩니다."),
+    ("불완전한 지문", "감식반이 복원한 부분 지문은 {suspects} 중 한 명의 기록과 유사합니다."),
+    ("젖은 구두 자국", "빗물 성분이 남은 발자국은 {suspects} 중 한 명이 현장을 지났음을 시사합니다."),
+]
+
 
 def clean_room_name(raw: str | None) -> str:
     if not raw:
@@ -138,6 +146,7 @@ class Room:
         self.questions: deque[dict[str, str | int]] = deque(maxlen=24)
         self.claims: deque[dict[str, str | int]] = deque(maxlen=36)
         self.moments: deque[dict[str, str | int | None]] = deque(maxlen=48)
+        self.clues: deque[dict[str, Any]] = deque(maxlen=12)
         self.reads: dict[str, dict[str, str]] = {}
         self.wills: dict[str, str] = {}
         self.interrogation_order: list[str] = []
@@ -169,6 +178,38 @@ class Room:
             "actor": actor,
             "target": target,
             "round": self.round,
+        })
+
+    def _add_forensic_clue(
+        self,
+        attacker_id: str | None,
+        victim_id: str,
+        outcome: str,
+    ) -> None:
+        """Reveal a truthful but non-conclusive suspect cluster after an attack."""
+        attacker = self.players.get(attacker_id or "")
+        victim = self.players.get(victim_id)
+        if not attacker or not victim:
+            return
+        decoys = [
+            player for player in self.players.values()
+            if player.id not in {attacker.id, victim.id}
+            and player.role != "spectator"
+        ]
+        suspects = [attacker, *random.sample(decoys, min(2, len(decoys)))]
+        random.shuffle(suspects)
+        title, template = random.choice(FORENSIC_CLUES)
+        names = " · ".join(player.nick for player in suspects)
+        detail = template.format(suspects=names)
+        self.clues.append({
+            "id": secrets.token_hex(4),
+            "code": f"E-{self.round:02d}-{len(self.clues) + 1:02d}",
+            "round": self.round,
+            "title": title,
+            "detail": detail,
+            "outcome": outcome,
+            "suspect_ids": [player.id for player in suspects],
+            "suspects": [player.nick for player in suspects],
         })
 
     def touch(self) -> None:
@@ -379,6 +420,7 @@ class Room:
         self.questions.clear()
         self.claims.clear()
         self.moments.clear()
+        self.clues.clear()
         self.reads.clear()
         self.wills.clear()
         self.interrogation_order.clear()
@@ -415,6 +457,7 @@ class Room:
         self.questions.clear()
         self.claims.clear()
         self.moments.clear()
+        self.clues.clear()
         self.reads.clear()
         self.wills.clear()
         self.interrogation_order.clear()
@@ -805,6 +848,7 @@ class Room:
                     self._bot_suspicions[actor.id] = target.id
 
         guarding = next(((guard, target) for guard, target in guard_targets if target == victim_id), None)
+        clue_outcome = "습격 흔적"
         if victim_id and victim_id != saved_id and guarding and guarding[0] in self.players:
             guard = self.players[guarding[0]]
             guard.alive = False
@@ -812,6 +856,7 @@ class Room:
             line = f"{guard.nick}님이 누군가를 지키다 대신 죽었습니다."
             self._record(line)
             self._moment("death", line, target=guard.id)
+            clue_outcome = "경호 개입"
         elif victim_id and victim_id != saved_id and victim_id in self.players:
             victim = self.players[victim_id]
             victim.alive = False
@@ -819,14 +864,25 @@ class Room:
             line = f"{victim.nick}님이 죽었습니다."
             self._record(line)
             self._moment("death", line, target=victim.id)
+            clue_outcome = "사망 사건"
         elif victim_id and victim_id == saved_id:
             line = "누군가 습격받았지만 의사의 치료로 살아남았습니다."
             self._record(line)
             self._moment("rescue", line)
+            clue_outcome = "치료 개입"
         else:
             line = "밤은 조용히 지나갔습니다. 아무도 희생되지 않았습니다."
             self._record(line)
             self._moment("dawn", line)
+
+        if victim_id:
+            attackers = [
+                actor_id for actor_id, target_id in self.actions.items()
+                if target_id == victim_id
+                and self.players.get(actor_id)
+                and self.players[actor_id].role == "mafia"
+            ]
+            self._add_forensic_clue(attackers[0] if attackers else None, victim_id, clue_outcome)
 
         if not self._check_win():
             self._set_phase("dawn", self._seconds("dawn"))
@@ -976,6 +1032,9 @@ class Room:
             if viewer.id == self.accused_id:
                 return "최종 판결을 기다리고 있습니다. 피고인은 찬반 투표에 참여할 수 없습니다."
             return "처형 또는 석방을 선택하세요. 기권표는 판결 수에 포함되지 않습니다."
+        if self.phase == "dawn" and self.clues:
+            clue = self.clues[-1]
+            return f"감식 단서 {clue['code']}: {clue['title']}. 후보들의 알리바이와 밤 행동 주장을 대조하세요."
         if self.phase in {"dawn", "result"}:
             return "사건 기록과 투표수를 확인하세요. 결과가 나오기 전 했던 주장과 맞는지 비교하면 다음 단서가 됩니다."
         return "역할 공개와 사건 기록을 비교해 승부를 가른 거짓말을 찾아보세요."
@@ -1077,6 +1136,7 @@ class Room:
             ],
             "story": list(self.story),
             "case_log": list(self.case_log),
+            "clues": list(self.clues),
             "guide": self._guide_for(viewer),
             "chat": visible_chat[-30:],
             "reactions": recent_reactions,

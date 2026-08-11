@@ -85,17 +85,17 @@ type AudioWindow = Window & typeof globalThis & { webkitAudioContext?: typeof Au
 
 const TUTORIAL_SCENES = [
   { tag: "SCENE 01 · 정체", title: "밤에는 역할이 움직입니다", copy: "마피아는 습격하고, 의사와 경호원은 누군가를 지키며, 탐정은 단 한 명의 진실을 확인합니다.", icon: Moon },
-  { tag: "SCENE 02 · 토론", title: "낮에는 말이 증거입니다", copy: "모두 자유롭게 대화하면서 순서대로 바뀌는 집중 발언자의 주장을 확인하세요. 질문과 신뢰·보류·의심 판단은 투표 전에 근거로 공개됩니다.", icon: MessageCircle },
-  { tag: "SCENE 03 · 반전", title: "수상하다고 모두 마피아는 아닙니다", copy: "광대는 시민 투표로 처형되면 혼자 승리합니다. 표를 던지기 전 동기와 행동 결과를 함께 확인하세요.", icon: Sparkles },
+  { tag: "SCENE 02 · 감식", title: "단서는 범인을 포함합니다", copy: "새벽마다 공개되는 현장 단서는 실제 습격자와 무고한 용의자를 함께 가리킵니다. 후보들의 알리바이를 직접 비교하세요.", icon: Search },
+  { tag: "SCENE 03 · 토론", title: "낮에는 말이 증거입니다", copy: "모두 자유롭게 대화하면서 집중 발언자의 주장을 확인하세요. 질문과 신뢰·보류·의심 판단은 투표 전에 근거로 공개됩니다.", icon: MessageCircle },
   { tag: "SCENE 04 · 재판", title: "지목은 곧 처형이 아닙니다", copy: "가장 많은 표를 받은 피고에게 최후 변론이 주어집니다. 진술을 들은 생존자들이 처형 또는 석방을 최종 결정합니다.", icon: Gavel },
-  { tag: "SCENE 05 · 복기", title: "모든 거짓말은 사건 파일에 남습니다", copy: "게임이 끝나면 역할과 전체 사건 기록을 되짚어 보세요. 다음 판에는 같은 거짓말이 통하지 않을 겁니다.", icon: BookOpen },
+  { tag: "SCENE 05 · 복기", title: "모든 거짓말은 사건 파일에 남습니다", copy: "게임이 끝나면 현장 단서, 역할과 전체 진술을 되짚어 보세요. 다음 판에는 같은 거짓말이 통하지 않을 겁니다.", icon: BookOpen },
 ];
 
 const LANDING_SCENES = [
-  { tag: "NIGHT 01", title: "밤이 되었습니다", copy: "마피아가 움직이고 있습니다. 능력을 봉인하세요.", icon: Moon, tone: "night" },
-  { tag: "INTERROGATION", title: "공개 심문 진행 중", copy: "한 사람의 진술을 듣고 신뢰 또는 의심을 기록합니다.", icon: Radio, tone: "interrogation" },
-  { tag: "CITY VOTE", title: "도시가 선택합니다", copy: "모든 말이 한 표의 책임으로 돌아오는 순간입니다.", icon: Gavel, tone: "vote" },
-  { tag: "CASE REVEAL", title: "거짓말이 드러납니다", copy: "게임이 끝나면 결정적 주장과 선택을 다시 확인합니다.", icon: Eye, tone: "reveal" },
+  { tag: "SCENE LOCKED", title: "살인 현장이 봉쇄되었습니다", copy: "용의자는 전원 이 방 안에 있습니다. 첫 번째 밤 행동을 선택하세요.", icon: Moon, tone: "night" },
+  { tag: "FORENSIC CLUE", title: "현장 단서가 도착했습니다", copy: "단서는 범인을 포함한 소수의 용의자를 가리키지만 결론까지 알려주지는 않습니다.", icon: Search, tone: "interrogation" },
+  { tag: "INTERROGATION", title: "진술의 모순을 추적합니다", copy: "알리바이를 묻고, 공개 진술과 현장 기록을 대조하세요.", icon: Radio, tone: "vote" },
+  { tag: "FINAL VERDICT", title: "범인을 지목할 시간입니다", copy: "최후 변론을 들은 뒤 처형 또는 석방을 결정합니다.", icon: Gavel, tone: "reveal" },
 ] as const;
 
 const LANDING_ROLES = [
@@ -161,6 +161,7 @@ export default function GamePage() {
   const [micMuted, setMicMuted] = useState(false);
   const [soundOn, setSoundOn] = useState(false);
   const [evidence, setEvidence] = useState<Record<string, -1 | 0 | 1>>({});
+  const [mobileTab, setMobileTab] = useState<"case" | "suspects" | "talk" | "role">("suspects");
   const [phaseAlert, setPhaseAlert] = useState<GameState["phase"] | null>(null);
   const [decisionFlash, setDecisionFlash] = useState<{ label: string; target: string } | null>(null);
   const previousPhase = useRef<string | null>(null);
@@ -270,6 +271,7 @@ export default function GamePage() {
     if (changed) {
       lastCountdownBeep.current = null;
       setPhaseAlert(game.phase);
+      setMobileTab(game.phase === "reveal" ? "role" : ["dawn", "result", "gameover"].includes(game.phase) ? "case" : "suspects");
       if (phaseAlertTimer.current) window.clearTimeout(phaseAlertTimer.current);
       phaseAlertTimer.current = window.setTimeout(() => setPhaseAlert(null), 3400);
     }
@@ -384,6 +386,7 @@ export default function GamePage() {
             accused_id: next.accused_id ?? null,
             judgement_counts: next.judgement_counts ?? { execute: 0, spare: 0 },
             ballot_feed: next.ballot_feed ?? [],
+            clues: next.clues ?? [],
             decision_progress: next.decision_progress ?? { completed: 0, total: 0 },
             case_log: next.case_log ?? next.story ?? [],
             reactions: next.reactions ?? [],
@@ -711,8 +714,9 @@ export default function GamePage() {
   const copyCaseFile = async () => {
     if (!game) return;
     const roles = game.players.filter((player) => player.role).map((player) => `${player.n} — ${ROLE_META[player.role!].name} · ${player.score}점`).join("\n");
+    const clues = game.clues.map((clue) => `${clue.code} ${clue.title} — ${clue.detail}`).join("\n");
     const history = game.case_log.map((line, index) => `${String(index + 1).padStart(2, "0")}  ${line}`).join("\n");
-    await navigator.clipboard.writeText(`[검은 자정 · ${room}]\n${roles}\n\n사건 기록\n${history}`);
+    await navigator.clipboard.writeText(`[검은 자정 · ${room}]\n${roles}\n\n현장 단서\n${clues || "아직 확보된 단서 없음"}\n\n사건 기록\n${history}`);
     setNotice("전체 사건 기록을 복사했습니다.");
   };
 
@@ -730,13 +734,13 @@ export default function GamePage() {
       <main className="landing-shell">
         <div className="grain" />
         <div className="landing-atmosphere" aria-hidden="true"><i /><i /><i /><span /></div>
-        <header className="landing-nav"><div><Moon size={17} fill="currentColor" /><b>검은 자정</b></div><span><i />CITY NETWORK ONLINE{networkStatus ? ` · ${networkStatus.players}명 접속 · ${networkStatus.active_matches}건 진행` : ""}</span></header>
+        <header className="landing-nav"><div><Search size={17} /><b>검은 자정 · 사건 파일</b></div><span><i />INVESTIGATION NETWORK{networkStatus ? ` · ${networkStatus.players}명 접속 · ${networkStatus.active_matches}건 수사 중` : ""}</span></header>
         <div className="city-coordinate"><span>37°34&apos;N · 126°58&apos;E</span><b>MIDNIGHT DISTRICT / LIVE FEED 00:42</b></div>
         <section className="landing-copy">
-          <div className="eyebrow"><span /> LIVE SOCIAL DEDUCTION · SEASON 3</div>
+          <div className="eyebrow"><span /> INTERACTIVE MURDER MYSTERY</div>
           <h1><span>검은</span> <em>자정</em></h1>
-          <p className="hero-line">이 도시의 누군가는 마피아다.</p>
-          <div className="mafia-warning"><Skull size={18} /><span><b>WHO IS LYING?</b><small>정체를 감추고, 거짓말을 찾아, 자정까지 살아남아라.</small></span><i>CASE 00</i></div>
+          <p className="hero-line">한 명이 죽었다. 범인은 아직 이 방 안에 있다.</p>
+          <div className="mafia-warning"><Search size={18} /><span><b>CASE 042 · 밀실 살인</b><small>현장 단서를 대조하고, 거짓 알리바이를 깨고, 범인을 찾아내라.</small></span><i>UNSOLVED</i></div>
           <div key={landingSceneMeta.tag} className={`landing-live-case tone-${landingSceneMeta.tone}`} aria-live="polite">
             <div className="live-case-visual"><LandingSceneIcon size={23} /><span><i />LIVE CASE</span></div>
             <div className="live-case-copy"><small>{landingSceneMeta.tag}</small><b>{landingSceneMeta.title}</b><p>{landingSceneMeta.copy}</p></div>
@@ -746,7 +750,7 @@ export default function GamePage() {
             <div className="role-strip">{LANDING_ROLES.map((item, index) => <button type="button" key={item.code} className={`landing-role ${index === landingRole ? "active" : ""}`} onClick={() => setLandingRole(index)}><div className={`role-face avatar-photo avatar-${item.avatar}`} /><span><small>{item.code}</small><b>{item.name}</b><em>{item.tagline}</em></span></button>)}</div>
             <div className="role-whisper"><span>{landingRoleMeta.name} 생존 전략</span><p>{landingRoleMeta.copy}</p></div>
           </div>
-          <button className="hero-join-cta" type="button" onClick={focusJoinCard}><span><b>{invitedByLink ? "초대받은 사건에 합류" : "30초 만에 사건 시작"}</b><small>이름만 정하면 설치 없이 바로 입장합니다</small></span><ChevronRight size={18} /></button>
+          <button className="hero-join-cta" type="button" onClick={focusJoinCard}><span><b>{invitedByLink ? "초대받은 수사에 합류" : "새 사건 수사 시작"}</b><small>모바일·PC 어디서나 설치 없이 바로 입장</small></span><ChevronRight size={18} /></button>
           <div className="local-stats"><div><b>{stats.games}</b><span>플레이</span></div><div><b>{stats.wins}</b><span>승리</span></div><div><b>{stats.streak}</b><span>연승</span></div></div>
           <button className="ranking-launch" type="button" onClick={() => setRankingOpen(true)}><Trophy size={16} /><span><b>명예의 전당</b><small>{leaderboard[0] ? `현재 1위 ${leaderboard[0].name} · ${leaderboard[0].best_score}점` : "첫 번째 전설이 되어보세요"}</small></span><ChevronRight size={16} /></button>
           <button className="briefing-launch" type="button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}><Film size={16} /><span><b>30초 AI 시네마틱 브리핑</b><small>룰을 몰라도 한 번에 이해하기</small></span><ChevronRight size={16} /></button>
@@ -759,14 +763,14 @@ export default function GamePage() {
           </div>
           {invitedByLink && <div className="invited-room"><UserPlus size={15} /><span><b>비밀 초대장이 도착했습니다</b><small>{roomInput} 사건의 자리가 확보되어 있습니다.</small></span></div>}
           <div className="join-presence"><div><span className="avatar-photo avatar-1" /><span className="avatar-photo avatar-4" /><span className="avatar-photo avatar-7" /></div><p>{networkStatus ? <><b>{networkStatus.players}명</b>이 현재 도시 네트워크에 접속 중</> : <>실시간 도시 네트워크 연결 중</>}</p></div>
-          <h2>{invitedByLink ? "초대에 응답하기" : "테이블에 앉기"}</h2>
-          <p>이름을 정하고 방에 들어가세요. 역할은 입장 후 서버가 비밀리에 봉인합니다.</p>
+          <h2>{invitedByLink ? "수사 초대에 응답" : "사건 담당자 등록"}</h2>
+          <p>수사에서 사용할 이름을 정하세요. 입장 후 누군가는 범인, 누군가는 진실을 쫓는 역할을 받습니다.</p>
           <div className="join-steps"><span className="active"><b>01</b>이름 설정</span><i /><span><b>02</b>친구 합류</span><i /><span><b>03</b>역할 봉인</span></div>
           <div className="join-warning"><Skull size={14} /><span>입장 후 배역은 봉인됩니다. 아무도 믿지 마세요.</span></div>
           <form onSubmit={submitJoin}>
-            <label><span>당신의 이름 <em>{nick.length}/16</em></span><input id="landing-nick" value={nick} onChange={(e) => setNick(e.target.value)} placeholder="게임에서 불릴 이름" maxLength={16} autoFocus /></label>
+            <label><span>당신의 이름 <em>{nick.length}/16</em></span><input id="landing-nick" value={nick} onChange={(e) => setNick(e.target.value)} placeholder="게임에서 불릴 이름" maxLength={16} /></label>
             <label><span>비밀 방 코드 <em>{invitedByLink ? "초대 링크에서 확인됨" : "친구와 공유할 코드"}</em></span><div className="room-field"><input value={roomInput} onChange={(e) => { setRoomInput(e.target.value); setInvitedByLink(false); }} maxLength={32} /><button type="button" onClick={() => { setRoomInput(makeRoom()); setInvitedByLink(false); }} aria-label="새 방 코드 만들기"><RotateCcw size={15} /></button></div></label>
-            <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim()}><LogIn size={18} /><span>{nick.trim() ? `${nick.trim()}으로 사건 참가` : "이름을 입력하고 사건 참가"}</span><ChevronRight size={16} /></button>
+            <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim()}><LogIn size={18} /><span>{nick.trim() ? `${nick.trim()}으로 수사 합류` : "이름을 입력하고 수사 합류"}</span><ChevronRight size={16} /></button>
           </form>
           {installPrompt && <button className="install-button" type="button" onClick={installApp}><Smartphone size={16} /> 홈 화면에 앱 설치</button>}
           <div className="join-proof"><span><Check size={12} />설치 없음</span><span><Check size={12} />AI 인원 채우기</span><span><Check size={12} />실시간 음성</span></div>
@@ -783,7 +787,7 @@ export default function GamePage() {
   }
 
   return (
-    <main className={`game-shell phase-${game.phase} ${remaining > 0 && remaining <= 10 && game.phase !== "reveal" ? "is-urgent" : ""}`}>
+    <main className={`game-shell phase-${game.phase} mobile-view-${mobileTab} ${remaining > 0 && remaining <= 10 && game.phase !== "reveal" ? "is-urgent" : ""}`}>
       <div className="grain" />
       <div className="city-atmosphere" aria-hidden="true"><i /><i /><i /></div>
       {notice && <div className="toast">{notice}</div>}
@@ -907,7 +911,16 @@ export default function GamePage() {
         </section>
 
         <aside className="comms-panel">
-          <div className="story-card"><div className="story-card-head"><div className="panel-label">LIVE INCIDENT FEED</div><button onClick={() => setCaseOpen(true)}><BookOpen size={13} />전체 기록</button></div><div className="ai-director"><div><Radio size={14} /><b>자정 관제실 · 실시간 지령</b><i /></div><p>{game.guide}</p></div><div className="story-list">{game.story.slice(-5).map((line, i) => <div key={`${line}-${i}`} className={i === Math.min(4, game.story.length - 1) ? "latest" : ""}><span>{String(Math.max(0, game.story.length - 5) + i + 1).padStart(2, "0")}</span><p>{line}</p></div>)}</div>{game.phase === "gameover" && <div className="case-file"><b>사건 파일 · 최종 배역</b><div>{game.players.filter((p) => p.role).map((p) => <span key={p.id}>{p.n} — {p.role ? ROLE_META[p.role].name : "?"} · {p.score}점</span>)}</div></div>}</div>
+          <div className="story-card">
+            <div className="story-card-head"><div className="panel-label">CASE INVESTIGATION</div><button onClick={() => setCaseOpen(true)}><BookOpen size={13} />전체 기록</button></div>
+            <div className="ai-director"><div><Radio size={14} /><b>현장 지휘실 · 다음 수사</b><i /></div><p>{game.guide}</p></div>
+            <div className="forensic-board">
+              <header><Search size={14} /><span><b>현장 감식 단서</b><small>{game.clues.length ? `${game.clues.length}개 확보 · 범인을 포함한 후보군` : "첫 번째 사건 보고를 기다리는 중"}</small></span></header>
+              {game.clues.length ? <div>{game.clues.slice(-3).reverse().map((clue) => <article key={clue.id}><span>{clue.code}</span><b>{clue.title}</b><p>{clue.detail}</p><small>{clue.outcome} · DAY {clue.round}</small></article>)}</div> : <p className="forensic-empty">밤의 습격이 발생하면 감식반이 범인을 포함한 용의자 묶음을 공개합니다.</p>}
+            </div>
+            <div className="story-list">{game.story.slice(-5).map((line, i) => <div key={`${line}-${i}`} className={i === Math.min(4, game.story.length - 1) ? "latest" : ""}><span>{String(Math.max(0, game.story.length - 5) + i + 1).padStart(2, "0")}</span><p>{line}</p></div>)}</div>
+            {game.phase === "gameover" && <div className="case-file"><b>사건 파일 · 최종 배역</b><div>{game.players.filter((p) => p.role).map((p) => <span key={p.id}>{p.n} — {p.role ? ROLE_META[p.role].name : "?"} · {p.score}점</span>)}</div></div>}
+          </div>
           <div className="chat-card">
             <div className={`voice-chat-bar ${voiceChatOn ? "connected" : ""}`}>
               <div><Headphones size={16} /><span><b>실시간 음성 테이블</b><small>{voiceChatOn ? `${voiceCount}명 연결 · ${voiceCanSpeak ? "발언 가능" : "현재 단계 자동 음소거"}` : "마이크 권한을 허용한 참가자끼리 대화"}</small></span></div>
@@ -923,6 +936,12 @@ export default function GamePage() {
           </div>
         </aside>
       </div>
+      <nav className="mobile-game-nav" aria-label="모바일 게임 메뉴">
+        <button className={mobileTab === "case" ? "active" : ""} onClick={() => setMobileTab("case")}><BookOpen size={19} /><span>사건</span>{game.clues.length > 0 && <i>{game.clues.length}</i>}</button>
+        <button className={mobileTab === "suspects" ? "active" : ""} onClick={() => setMobileTab("suspects")}><Search size={19} /><span>수사</span></button>
+        <button className={mobileTab === "talk" ? "active" : ""} onClick={() => setMobileTab("talk")}><MessageCircle size={19} /><span>대화</span>{game.chat.length > 0 && <i>{Math.min(9, game.chat.length)}</i>}</button>
+        <button className={mobileTab === "role" ? "active" : ""} onClick={() => setMobileTab("role")}><ShieldQuestion size={19} /><span>내 정보</span></button>
+      </nav>
       {tutorialOpen && <TutorialModal step={tutorialStep} setStep={setTutorialStep} onClose={closeTutorial} />}
       {inviteOpen && <InviteModal room={room} online={game.players.filter((player) => player.connected).length} copied={copied} onClose={() => setInviteOpen(false)} onCopy={copyInvite} onShare={shareInvite} onPoster={() => createPoster("invite")} />}
       {caseOpen && <CaseFileModal game={game} room={room} onClose={() => setCaseOpen(false)} onCopy={copyCaseFile} />}
@@ -982,7 +1001,7 @@ function CaseFileModal({ game, room, onClose, onCopy }: { game: GameState; room:
         <header><div><span>BLACK MIDNIGHT / ARCHIVE</span><h2>사건 파일</h2><p>ROOM {room} · DAY {game.round || 0}</p></div><button onClick={onClose} aria-label="사건 기록 닫기"><X size={19} /></button></header>
         <div className="case-modal-grid">
           <aside><div className="case-seal"><Gavel size={26} /><span>{game.phase === "gameover" ? "CASE CLOSED" : "ACTIVE CASE"}</span></div><h3>용의자 기록</h3>{game.players.map((player, index) => <div className="case-suspect" key={player.id}><div className={`avatar-photo avatar-${index % 12}`} /><span><b>{player.n}</b><small>{game.phase === "gameover" && player.role ? ROLE_META[player.role].name : player.alive ? "생존 · 신원 미상" : "사망 · 신원 미상"}</small></span><em>{player.score} PTS</em></div>)}</aside>
-          <article><div className="case-log-title"><span>INCIDENT TIMELINE</span><b>{game.case_log.length} RECORDS</b></div><div className="case-log-scroll">{game.case_log.length === 0 && <p className="case-empty">아직 기록된 사건이 없습니다.</p>}{game.case_log.map((line, index) => <div key={`${line}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><p>{line}</p></div>)}</div><button className="secondary-button case-copy" onClick={onCopy}><Clipboard size={16} />전체 사건 기록 복사</button></article>
+          <article><div className="case-log-title"><span>FORENSIC EVIDENCE</span><b>{game.clues.length} CLUES</b></div>{game.clues.length > 0 && <div className="case-clue-grid">{game.clues.map((clue) => <div key={clue.id}><span>{clue.code}</span><b>{clue.title}</b><p>{clue.detail}</p><small>{clue.outcome}</small></div>)}</div>}<div className="case-log-title timeline-title"><span>INCIDENT TIMELINE</span><b>{game.case_log.length} RECORDS</b></div><div className="case-log-scroll">{game.case_log.length === 0 && <p className="case-empty">아직 기록된 사건이 없습니다.</p>}{game.case_log.map((line, index) => <div key={`${line}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><p>{line}</p></div>)}</div><button className="secondary-button case-copy" onClick={onCopy}><Clipboard size={16} />전체 사건 기록 복사</button></article>
         </div>
       </section>
     </div>

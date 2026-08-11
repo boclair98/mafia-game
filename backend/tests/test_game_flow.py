@@ -297,6 +297,21 @@ def test_night_victim_can_leave_one_public_will_at_dawn():
     assert room.leave_will("p4", "두 번째 유언") == "유언은 한 번만 남길 수 있습니다."
 
 
+def test_forensic_clue_always_includes_the_real_attacker_without_revealing_one_answer():
+    room = room_with("mafia", "doctor", "detective", "citizen", "citizen")
+    room.round = 1
+    room.phase = "night"
+    room.actions = {"p1": "p5", "p2": "p2", "p3": "p4"}
+
+    room._resolve_night()
+
+    clue = room.clues[-1]
+    assert "p1" in clue["suspect_ids"]
+    assert len(clue["suspect_ids"]) == 3
+    assert "P1" in clue["detail"]
+    assert room._state_for(room.players["p2"])["clues"][-1]["id"] == clue["id"]
+
+
 def test_rematch_erases_previous_public_and_mafia_chat():
     room = room_with("mafia", "doctor", "detective", "citizen")
     room.phase = "gameover"

@@ -22,6 +22,7 @@ export type InterrogationQuestion = { id: string; from: string; from_id: string;
 export type SealedClaim = { id: string; speaker_id: string; speaker: string; text: string; round: number; at: number };
 export type CaseMoment = { id: string; kind: string; text: string; actor: string | null; target: string | null; round: number };
 export type BallotEntry = { voter_id: string; voter: string; target_id: string; target: string };
+export type CaseClue = { id: string; code: string; round: number; title: string; detail: string; outcome: string; suspect_ids: string[]; suspects: string[] };
 
 export type GameState = {
   t: "state";
@@ -49,6 +50,7 @@ export type GameState = {
   };
   story: string[];
   case_log: string[];
+  clues: CaseClue[];
   accused_id: string | null;
   judgement_counts: { execute: number; spare: number };
   decision_progress: { completed: number; total: number };

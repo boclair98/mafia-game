@@ -202,3 +202,47 @@ footer { max-width: 1550px; margin: 14px auto; display: flex; justify-content: s
 @media (max-width: 420px) {
   .landing-copy h1 { font-size: 62px; }.rule-strip span { font-size: 10px; }.join-card { width: 90%; padding: 26px; }.room-pill span { display: none; }.room-pill b { border-left: 0; }.phase-banner h1 { font-size: 28px; }.primary-button, .secondary-button, .danger-button { padding: 0 13px; }.start-game-button { min-width: 116px; gap: 6px; }
 }
+
+/* Murder-mystery visual system */
+.landing-shell { background-image: url('/case-room-wide.webp'); background-position: center; }
+.landing-shell::before { background: linear-gradient(90deg,rgba(3,5,8,.94) 0%,rgba(3,5,8,.68) 42%,rgba(3,5,8,.18) 69%,rgba(3,5,8,.82) 100%),linear-gradient(0deg,rgba(3,5,8,.96),transparent 56%,rgba(3,5,8,.5)); }
+.landing-nav > div { color: #e4ded2; }.landing-nav > div svg { color: var(--gold); }
+.mafia-warning { border-color: rgba(209,168,92,.42); background: linear-gradient(90deg,rgba(82,56,19,.28),rgba(6,8,11,.68)); }.mafia-warning > svg { color: var(--gold); }.mafia-warning b { color: #ead9b5; }
+.game-shell { background-image: url('/case-room-wide.webp'); background-position: center; }
+.game-shell::before { background: linear-gradient(rgba(4,6,9,.9),rgba(4,6,9,.97)),radial-gradient(circle at 72% 18%,rgba(150,37,43,.13),transparent 38%); }
+.mobile-game-nav { display: none; }
+.forensic-board { margin-top: 14px; padding: 12px; border: 1px solid rgba(209,168,92,.28); background: linear-gradient(145deg,rgba(209,168,92,.07),rgba(7,9,12,.62)); }
+.forensic-board > header { display: flex; align-items: center; gap: 8px; color: var(--gold); }.forensic-board > header span { display: grid; }.forensic-board > header b { color: #dcd5c8; font-size: 9px; }.forensic-board > header small { margin-top: 2px; color: #6e747d; font-size: 7px; }
+.forensic-board > div { margin-top: 10px; display: grid; gap: 6px; }.forensic-board article { padding: 9px; position: relative; border-left: 2px solid var(--gold); background: rgba(6,8,11,.64); }.forensic-board article > span { color: var(--red); font: 6px monospace; letter-spacing: .14em; }.forensic-board article b { display: block; margin-top: 3px; color: #d7d1c5; font-size: 9px; }.forensic-board article p { margin: 5px 0; color: #888d94; font-size: 8px; line-height: 1.45; }.forensic-board article small { color: #665f52; font-size: 7px; }.forensic-empty { margin: 10px 0 0; color: #707680; font-size: 8px; line-height: 1.5; }
+.case-clue-grid { margin: 12px 0 18px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }.case-clue-grid > div { padding: 10px; border: 1px solid rgba(209,168,92,.26); background: rgba(209,168,92,.045); }.case-clue-grid span { color: var(--red); font: 7px monospace; }.case-clue-grid b { display: block; margin-top: 3px; color: #d4cec2; font-size: 9px; }.case-clue-grid p { margin: 5px 0; color: #777e87; font-size: 8px; line-height: 1.5; }.case-clue-grid small { color: var(--gold); font-size: 7px; }.timeline-title { margin-top: 5px; }
+
+@media (max-width: 760px) {
+  .landing-shell { padding-bottom: 0; background-image: url('/case-room-mobile.webp'); background-size: 100% auto; background-position: center top; background-repeat: no-repeat; background-color: #05070a; }
+  .landing-shell::before { background: linear-gradient(180deg,rgba(2,4,7,.18) 0%,rgba(2,4,7,.3) 30%,rgba(2,4,7,.78) 57%,#05070a 88%); }
+  .landing-nav { top: max(20px,env(safe-area-inset-top)); left: 20px; right: 20px; }.landing-nav > div { font-size: 14px; }.landing-nav > span { font-size: 0; }.landing-nav > span::after { content: '수사망 연결'; font-size: 7px; }
+  .landing-copy { min-height: 100svh; justify-content: flex-start; padding: 105px 20px 32px; text-align: left; }
+  .landing-copy h1 { margin-top: 12px; font-size: clamp(55px,17vw,74px); }.hero-line { width: 78%; margin: 12px 0 16px; font-size: 14px; line-height: 1.55; }
+  .mafia-warning,.landing-live-case,.role-selector,.hero-join-cta { width: 100%; }.mafia-warning { margin-top: auto; background: rgba(8,10,14,.82); }
+  .landing-live-case { min-height: 76px; background: rgba(7,9,13,.86); }.live-case-copy p { max-width: 56vw; }
+  .role-strip { display: flex; overflow-x: auto; gap: 6px; scroll-snap-type: x mandatory; scrollbar-width: none; }.landing-role { flex: 0 0 145px; height: 64px; scroll-snap-align: start; grid-template-columns: 48px 1fr; grid-template-rows: 1fr; }.role-face { width: auto; }
+  .role-whisper { min-height: 44px; }.local-stats { margin-top: 10px; }.ranking-launch,.briefing-launch { width: 100%; }
+  .join-card { width: 100%; max-width: none; padding: 30px 22px calc(34px + env(safe-area-inset-bottom)); border-width: 1px 0 0; background: #0b0e13; box-shadow: 0 -24px 60px rgba(0,0,0,.52); }
+
+  .game-shell { min-height: 100svh; overflow-x: hidden; overflow-y: auto; padding: env(safe-area-inset-top) 10px calc(82px + env(safe-area-inset-bottom)); background-image: url('/case-room-mobile.webp'); background-size: cover; background-position: center top; background-attachment: fixed; }
+  .game-shell::before { position: fixed; background: linear-gradient(rgba(4,6,9,.9),rgba(4,6,9,.985)); }
+  .topbar { height: 54px; position: relative; z-index: 3; grid-template-columns: 1fr auto; }.mini-brand > span { display: inline; font-size: 12px; }.mini-brand .guide-button { display: none; }.room-pill { max-width: 52vw; height: 34px; }.room-pill b { max-width: 25vw; overflow: hidden; text-overflow: ellipsis; }
+  .phase-banner { height: 168px; padding: 18px 4px 38px; align-items: flex-start; justify-content: center; }.phase-banner h1 { margin: 6px 0 4px; font-size: 29px; }.phase-banner p { max-width: calc(100% - 74px); font-size: 9px; }.phase-now { margin-top: 8px; }.timer { top: 58px; right: 3px; font-size: 24px; }.phase-track { bottom: 8px; }.phase-track > div { font-size: 0; }.phase-track > div i { width: 6px; height: 6px; }
+  .game-grid { display: block; margin-top: 10px; min-height: calc(100svh - 250px); }.role-panel,.table-panel,.comms-panel { display: none; width: 100%; min-height: calc(100svh - 260px); }
+  .mobile-view-role .role-panel { display: block; }.mobile-view-suspects .table-panel { display: block; }.mobile-view-case .comms-panel,.mobile-view-talk .comms-panel { display: block; }
+  .mobile-view-case .chat-card { display: none; }.mobile-view-talk .story-card { display: none; }.mobile-view-talk .comms-panel { min-height: calc(100svh - 250px); }.mobile-view-talk .chat-card { display: flex; min-height: calc(100svh - 270px); }
+  .role-panel { padding: 20px; text-align: left; overflow: visible; }.role-photo { height: 190px; max-width: 170px; margin: 18px auto; }.role-panel h2,.role-panel > p { text-align: center; }.evidence-board { padding-bottom: 16px; }
+  .table-panel { overflow: visible; }.player-grid { grid-template-columns: repeat(2,minmax(0,1fr)); padding: 10px; gap: 7px; }.player-card,.empty-seat { min-height: 138px; }.portrait { min-height: 82px; }
+  .interrogation-stage { grid-template-columns: 72px minmax(0,1fr); min-height: 285px; }.interrogation-photo { min-height: 285px; }.interrogation-main { padding: 11px; }.interrogation-heading b { font-size: 16px; }.question-feed { max-height: 76px; }.read-summary-panel,.replay-panel { margin: 10px; padding: 12px; }
+  .action-bar { position: sticky; z-index: 35; bottom: 70px; margin: 0; padding: 10px; border-top-color: rgba(209,168,92,.28); box-shadow: 0 -16px 30px rgba(0,0,0,.7); }.action-bar .seal-button,.action-bar .danger-button,.action-bar .primary-button { min-height: 46px; }
+  .story-card { min-height: calc(100svh - 270px); padding: 15px; background: rgba(11,14,19,.94); }.forensic-board { padding: 11px; }.forensic-board article { padding: 10px; }.story-list { margin-top: 12px; }
+  .voice-chat-bar { position: sticky; top: 0; z-index: 3; background: #151a21; }.chat-scroll { flex: 1; max-height: none; min-height: 48svh; }.chat-form { position: sticky; bottom: 0; background: #0c0f14; }
+  .mobile-game-nav { position: fixed; z-index: 70; left: 0; right: 0; bottom: 0; height: calc(66px + env(safe-area-inset-bottom)); padding: 6px 8px env(safe-area-inset-bottom); display: grid; grid-template-columns: repeat(4,1fr); border-top: 1px solid #2d333c; background: rgba(8,10,14,.96); backdrop-filter: blur(18px); box-shadow: 0 -14px 40px rgba(0,0,0,.55); }
+  .mobile-game-nav button { min-width: 0; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 0; background: transparent; color: #666e79; font-size: 8px; }.mobile-game-nav button.active { color: #e0d8c9; }.mobile-game-nav button.active::before { content: ''; position: absolute; top: -6px; width: 32px; height: 2px; background: var(--gold); box-shadow: 0 0 12px var(--gold); }.mobile-game-nav button i { position: absolute; top: 2px; right: calc(50% - 19px); min-width: 14px; height: 14px; padding: 0 3px; display: grid; place-items: center; border-radius: 7px; background: var(--red); color: white; font: 6px monospace; font-style: normal; }
+  .case-clue-grid { grid-template-columns: 1fr; }.case-modal-grid > article { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+  footer { display: none; }
+}
