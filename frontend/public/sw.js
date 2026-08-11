@@ -1,5 +1,17 @@
-const CACHE = "black-midnight-v4";
-const SHELL = ["/", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png", "/case-room-wide.webp", "/case-room-mobile.webp", "/suspect-atlas.webp"];
+const CACHE = "black-midnight-v5";
+const SHELL = [
+  "/",
+  "/manifest.webmanifest",
+  "/icon.svg",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/mafia-table-wide-v2.webp",
+  "/mafia-table-mobile-v2.webp",
+  "/evidence-token-atlas.webp",
+  "/case-room-wide.webp",
+  "/case-room-mobile.webp",
+  "/midnight-city-ui.webp",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));

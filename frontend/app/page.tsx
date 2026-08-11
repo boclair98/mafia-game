@@ -114,10 +114,10 @@ function makeRoom() {
 
 function getPlayerKey(room: string) {
   const storageKey = `black-midnight:${room}`;
-  let key = sessionStorage.getItem(storageKey);
+  let key = localStorage.getItem(storageKey);
   if (!key) {
     key = crypto.randomUUID().replaceAll("-", "");
-    sessionStorage.setItem(storageKey, key);
+    localStorage.setItem(storageKey, key);
   }
   return key;
 }
@@ -129,6 +129,7 @@ function secondsLeft(deadline: number, now: number) {
 export default function GamePage() {
   const identity = useMe();
   const socketRef = useRef<GameSocket | null>(null);
+  const receivedPhaseRef = useRef<GameState["phase"] | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [joined, setJoined] = useState(false);
   const [nick, setNick] = useState("");
@@ -171,8 +172,10 @@ export default function GamePage() {
   const [mobileTab, setMobileTab] = useState<"case" | "suspects" | "talk" | "role">("suspects");
   const [phaseAlert, setPhaseAlert] = useState<GameState["phase"] | null>(null);
   const [decisionFlash, setDecisionFlash] = useState<{ label: string; target: string } | null>(null);
+  const [ballotReveal, setBallotReveal] = useState<{ entries: GameState["ballot_feed"]; visible: number } | null>(null);
   const previousPhase = useRef<string | null>(null);
   const phaseAlertTimer = useRef<number | null>(null);
+  const ballotRevealTimer = useRef<number | null>(null);
   const decisionFlashTimer = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const voiceRoomRef = useRef<VoiceRoom | null>(null);
@@ -199,7 +202,6 @@ export default function GamePage() {
       if (savedStats) {
         try { setStats(JSON.parse(savedStats) as LocalStats); } catch { localStorage.removeItem("black-midnight:stats"); }
       }
-      if (!localStorage.getItem("black-midnight:tutorial-seen")) setTutorialOpen(true);
       setVoiceOn(localStorage.getItem("black-midnight:voice") === "1");
       setSoundOn(localStorage.getItem("black-midnight:sound") === "1");
       setTermsAccepted(localStorage.getItem("black-midnight:terms-v1") === "1");
@@ -286,6 +288,10 @@ export default function GamePage() {
       setMobileTab(game.phase === "reveal" ? "role" : ["dawn", "result", "gameover"].includes(game.phase) ? "case" : "suspects");
       if (phaseAlertTimer.current) window.clearTimeout(phaseAlertTimer.current);
       phaseAlertTimer.current = window.setTimeout(() => setPhaseAlert(null), 3400);
+      if (ballotRevealTimer.current) window.clearTimeout(ballotRevealTimer.current);
+      if (game.phase === "defense" && game.ballot_feed.length) {
+        ballotRevealTimer.current = window.setTimeout(() => setBallotReveal({ entries: game.ballot_feed, visible: 0 }), 3600);
+      }
     }
     if (previousPhase.current && previousPhase.current !== game.phase && "vibrate" in navigator) {
       navigator.vibrate(game.phase === "vote" || game.phase === "night" ? [70, 35, 70] : 45);
@@ -305,6 +311,7 @@ export default function GamePage() {
 
   useEffect(() => () => {
     if (phaseAlertTimer.current) window.clearTimeout(phaseAlertTimer.current);
+    if (ballotRevealTimer.current) window.clearTimeout(ballotRevealTimer.current);
     if (decisionFlashTimer.current) window.clearTimeout(decisionFlashTimer.current);
     if (audioContextRef.current) void audioContextRef.current.close();
     voiceRoomRef.current?.stop();
@@ -383,15 +390,25 @@ export default function GamePage() {
 
   useEffect(() => {
     if (!joined || !room || !nick) return;
+    receivedPhaseRef.current = null;
     const key = getPlayerKey(room);
     const socket = new GameSocket(gameSocketUrl(room, nick, key), {
       onStatus: setStatus,
+      onFatal: (reason) => {
+        setWelcome(null);
+        setGame(null);
+        setJoined(false);
+        setNotice(reason === "room_full" ? "이 방은 정원이 가득 찼습니다. 다른 사건 코드를 선택해 주세요." : "방장이 좌석을 정리했습니다. 새 사건에 다시 합류해 주세요.");
+        window.setTimeout(() => setNotice(""), 4800);
+      },
       onMessage: (raw) => {
         const msg = raw as WelcomeMsg | GameState | { t: "error" | "notice"; message: string } | { t: "voice_signal"; from: string; data: VoiceSignal };
         if (msg.t === "welcome") {
           setWelcome(msg as WelcomeMsg);
         } else if (msg.t === "state") {
           const next = msg as GameState;
+          const phaseChanged = receivedPhaseRef.current !== next.phase;
+          receivedPhaseRef.current = next.phase;
           setGame({
             ...next,
             players: next.players.map((player) => ({ ...player, score: player.score ?? 0, voice: player.voice ?? false })),
@@ -399,6 +416,7 @@ export default function GamePage() {
             judgement_counts: next.judgement_counts ?? { execute: 0, spare: 0 },
             ballot_feed: next.ballot_feed ?? [],
             clues: next.clues ?? [],
+            public_leads: next.public_leads ?? [],
             decision_progress: next.decision_progress ?? { completed: 0, total: 0 },
             case_log: next.case_log ?? next.story ?? [],
             reactions: next.reactions ?? [],
@@ -413,9 +431,19 @@ export default function GamePage() {
               ...next.me,
               reads: next.me.reads ?? {},
               can_leave_will: next.me.can_leave_will ?? false,
+              private_lead: next.me.private_lead ?? null,
+              ghost_prediction: next.me.ghost_prediction ?? null,
+              ghost_correct: next.me.ghost_correct ?? null,
             },
           });
-          setSelected((current) => current && next.players.some((p) => p.id === current && p.alive) ? current : null);
+          setSelected((current) => {
+            if (phaseChanged) {
+              if (next.phase === "night") return next.me.action_target ?? null;
+              if (next.phase === "vote") return next.me.vote_target ?? null;
+              return null;
+            }
+            return current && next.players.some((p) => p.id === current && p.alive) ? current : null;
+          });
         } else if (msg.t === "error" || msg.t === "notice") {
           setNotice(msg.message);
           window.setTimeout(() => setNotice(""), 3200);
@@ -427,6 +455,16 @@ export default function GamePage() {
     socketRef.current = socket;
     return () => socket.close();
   }, [joined, room, nick]);
+
+  useEffect(() => {
+    if (!ballotReveal) return;
+    if (ballotReveal.visible < ballotReveal.entries.length) {
+      const timer = window.setTimeout(() => setBallotReveal((current) => current ? { ...current, visible: current.visible + 1 } : null), 550);
+      return () => window.clearTimeout(timer);
+    }
+    const timer = window.setTimeout(() => setBallotReveal(null), 900);
+    return () => window.clearTimeout(timer);
+  }, [ballotReveal]);
 
   useEffect(() => {
     if (!voiceChatOn) return;
@@ -452,7 +490,14 @@ export default function GamePage() {
     setJoined(true);
   };
 
-  const send = (message: object) => socketRef.current?.send(message);
+  const send = (message: object) => {
+    const sent = socketRef.current?.send(message) ?? false;
+    if (!sent) {
+      setNotice("연결을 복구하는 중입니다. 입력은 전송되지 않았으니 연결 후 다시 시도해 주세요.");
+      window.setTimeout(() => setNotice(""), 3200);
+    }
+    return sent;
+  };
   const blockPlayer = (id: string, name: string) => {
     const next = blockedPlayers.includes(id) ? blockedPlayers.filter((item) => item !== id) : [...blockedPlayers, id];
     setBlockedPlayers(next);
@@ -689,7 +734,7 @@ export default function GamePage() {
 
   const commitDecision = (kind: "action" | "vote") => {
     if (!selectedPlayer) return;
-    send({ t: kind, target: selectedPlayer.id });
+    if (!send({ t: kind, target: selectedPlayer.id })) return;
     const label = kind === "vote" ? "투표 봉인 완료" : `${refinedActionCopy} 선택 완료`;
     setDecisionFlash({ label, target: selectedPlayer.n });
     if (decisionFlashTimer.current) window.clearTimeout(decisionFlashTimer.current);
@@ -698,7 +743,7 @@ export default function GamePage() {
   };
 
   const commitJudgement = (execute: boolean) => {
-    send({ t: "judge", execute });
+    if (!send({ t: "judge", execute })) return;
     setDecisionFlash({ label: execute ? "처형 판결 봉인" : "석방 판결 봉인", target: accusedPlayer?.n ?? "피고" });
     if (decisionFlashTimer.current) window.clearTimeout(decisionFlashTimer.current);
     decisionFlashTimer.current = window.setTimeout(() => setDecisionFlash(null), 2600);
@@ -709,7 +754,7 @@ export default function GamePage() {
     event.preventDefault();
     const text = chatText.trim();
     if (!text) return;
-    send({ t: "chat", text });
+    if (!send({ t: "chat", text })) return;
     setChatText("");
   };
 
@@ -717,7 +762,7 @@ export default function GamePage() {
     event.preventDefault();
     const text = questionText.trim();
     if (!text || !currentSpeaker) return;
-    send({ t: "question", text });
+    if (!send({ t: "question", text })) return;
     setQuestionText("");
   };
 
@@ -725,7 +770,7 @@ export default function GamePage() {
     event.preventDefault();
     const text = claimText.trim();
     if (!text) return;
-    send({ t: "claim", text });
+    if (!send({ t: "claim", text })) return;
     setClaimText("");
   };
 
@@ -733,7 +778,7 @@ export default function GamePage() {
     event.preventDefault();
     const text = willText.trim();
     if (!text) return;
-    send({ t: "will", text });
+    if (!send({ t: "will", text })) return;
     setWillText("");
   };
 
@@ -759,6 +804,7 @@ export default function GamePage() {
     return (
       <main className="landing-shell">
         <div className="grain" />
+        {notice && <div className="toast">{notice}</div>}
         <div className="landing-atmosphere" aria-hidden="true"><i /><i /><i /><span /></div>
         <header className="landing-nav"><div><Search size={17} /><b>검은 자정 · 사건 파일</b></div><button className="landing-settings" onClick={() => setSettingsOpen(true)} aria-label="설정과 운영 정책"><Settings size={16} /></button><span><i />INVESTIGATION NETWORK{networkStatus ? ` · ${networkStatus.players}명 접속 · ${networkStatus.active_matches}건 수사 중` : ""}</span></header>
         <div className="city-coordinate"><span>37°34&apos;N · 126°58&apos;E</span><b>MIDNIGHT DISTRICT / LIVE FEED 00:42</b></div>
@@ -779,7 +825,7 @@ export default function GamePage() {
           <button className="hero-join-cta" type="button" onClick={focusJoinCard}><span><b>{invitedByLink ? "초대받은 수사에 합류" : "새 사건 수사 시작"}</b><small>모바일·PC 어디서나 설치 없이 바로 입장</small></span><ChevronRight size={18} /></button>
           <div className="local-stats"><div><b>{stats.games}</b><span>플레이</span></div><div><b>{stats.wins}</b><span>승리</span></div><div><b>{stats.streak}</b><span>연승</span></div></div>
           <button className="ranking-launch" type="button" onClick={() => setRankingOpen(true)}><Trophy size={16} /><span><b>명예의 전당</b><small>{leaderboard[0] ? `현재 1위 ${leaderboard[0].name} · ${leaderboard[0].best_score}점` : "첫 번째 전설이 되어보세요"}</small></span><ChevronRight size={16} /></button>
-          <button className="briefing-launch" type="button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}><Film size={16} /><span><b>30초 AI 시네마틱 브리핑</b><small>룰을 몰라도 한 번에 이해하기</small></span><ChevronRight size={16} /></button>
+          <button className="briefing-launch" type="button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}><Film size={16} /><span><b>30초 사건 브리핑</b><small>룰을 몰라도 장면으로 한 번에 이해하기</small></span><ChevronRight size={16} /></button>
         </section>
         <section className="join-card">
           <div className="join-scanline" />
@@ -820,6 +866,7 @@ export default function GamePage() {
       <div className="grain" />
       <div className="city-atmosphere" aria-hidden="true"><i /><i /><i /></div>
       {notice && <div className="toast">{notice}</div>}
+      {status !== "open" && <div className="reconnect-veil" role="status" aria-live="assertive"><div><Radio size={22} /><span><b>사건 기록 재연결 중</b><small>현재 판은 그대로 유지됩니다. 연결 표시가 돌아온 뒤 선택을 다시 전송해 주세요.</small></span></div></div>}
       {decisionFlash && <div className="decision-flash" role="status"><LockKeyhole size={18} /><span><small>COMMAND SEALED</small><b>{decisionFlash.label}</b><em>{decisionFlash.target}</em></span></div>}
       {phaseAlert && alertMeta && (
         <div className={`phase-alert phase-alert-${phaseAlert}`} role="status" aria-live="assertive">
@@ -834,6 +881,23 @@ export default function GamePage() {
           </div>
         </div>
       )}
+      {ballotReveal && game.phase === "defense" && (
+        <div className="ballot-reveal" role="dialog" aria-modal="true" aria-label="봉인 투표 공개">
+          <div className="ballot-reveal-scene">
+            <button className="ballot-reveal-skip" onClick={() => setBallotReveal(null)} aria-label="투표 공개 연출 건너뛰기"><X size={17} /><span>건너뛰기</span></button>
+            <span>SEALED BALLOT · ROUND {game.round}</span>
+            <h2>도시의 표를 공개합니다</h2>
+            <div className="ballot-stamps">
+              {ballotReveal.entries.slice(0, ballotReveal.visible).map((entry, index) => (
+                <article key={entry.voter_id} className={index === ballotReveal.visible - 1 ? "latest" : ""}>
+                  <em>{String(index + 1).padStart(2, "0")}</em><b>{entry.voter}</b><ChevronRight size={16} /><strong>{entry.target}</strong>
+                </article>
+              ))}
+            </div>
+            <small>{Math.min(ballotReveal.visible, ballotReveal.entries.length)} / {ballotReveal.entries.length} 봉인 해제</small>
+          </div>
+        </div>
+      )}
       <header className="topbar">
         <div className="mini-brand"><Moon size={18} fill="currentColor" /><span>검은 자정</span><button className="guide-button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}><Film size={13} />룰 안내</button><button className="guide-button" onClick={() => setRankingOpen(true)}><Trophy size={13} />랭킹</button><button className="guide-button" onClick={() => setSettingsOpen(true)}><Settings size={13} />설정</button></div>
         <div className="room-pill"><span>ROOM</span><b>{room}</b><button onClick={copyInvite} aria-label="초대 링크 복사">{copied ? <Check size={15} /> : <Clipboard size={15} />}</button><button onClick={() => setInviteOpen(true)} aria-label="친구 초대 열기"><UserPlus size={15} /></button></div>
@@ -841,10 +905,11 @@ export default function GamePage() {
       </header>
 
       <section className="phase-banner">
+        <div className="scene-vignette" aria-hidden="true"><i /><span /></div>
         <div className="threat-monitor"><div><Siren size={14} /><span>CITY THREAT</span><b>{cityThreat}%</b></div><div className="threat-bar"><i style={{ width: `${cityThreat}%` }} /></div><small>{aliveCount} ALIVE · {lostCount} LOST</small></div>
         <div className="phase-kicker">{game.case_profile.code} · {game.case_profile.location} · {game.round ? `DAY ${game.round}` : "WAITING ROOM"}</div>
         <h1>{phase[0]}</h1>
-        <p>{phase[1]}</p>
+        <p><b>{game.case_profile.title}</b><span>{phase[1]}</span></p>
         <div className="phase-now" aria-live="polite"><i /><b>{PHASE_ALERT_META[game.phase].title}</b><span>{remaining > 0 ? `${remaining}초 남음` : game.phase === "lobby" ? "시작 대기 중" : "진행 중"}</span></div>
         <div className="active-directive"><Crosshair size={13} /><span><small>ACTIVE DIRECTIVE</small><b>{currentDirective}</b></span></div>
         <div className="phase-track" aria-label="게임 진행 단계">
@@ -860,6 +925,8 @@ export default function GamePage() {
 
         <section className="table-panel">
           <div className="panel-heading"><div><span>{game.phase === "lobby" ? "SUSPECT FILES" : "THE TABLE"}</span><h2>{game.phase === "lobby" ? "용의자 명단" : "참가자"}</h2></div><div>{game.players.filter((p) => p.alive).length} 생존</div></div>
+          {game.me.private_lead && game.phase !== "lobby" && <PrivateLeadCard lead={game.me.private_lead} canReveal={game.phase === "day" && game.me.alive} onReveal={() => send({ t: "reveal_lead", lead_id: game.me.private_lead?.id })} />}
+          {!game.me.alive && !["spectator", "mafia"].includes(role) && <AfterlifePanel game={game} onPredict={(target) => send({ t: "ghost_predict", target })} />}
           {accusedPlayer && ["defense", "verdict"].includes(game.phase) && (
             <div className={`trial-stage trial-${game.phase}`}>
               <div className="trial-light" />
@@ -905,9 +972,13 @@ export default function GamePage() {
           )}
           <div className="reaction-layer" aria-live="polite">{game.reactions.map((reaction, index) => <div key={reaction.id} style={{ left: `${12 + (index * 17) % 74}%`, animationDelay: `${(index % 3) * .08}s` }}><b>{reaction.emoji}</b><span>{reaction.from}</span></div>)}</div>
           <div className="player-grid">
-            {game.players.map((player, index) => (
-              <PlayerCard key={player.id} player={player} index={index} self={player.id === game.me.id} host={player.id === game.host} accused={player.id === game.accused_id} selected={selected === player.id} selectable={targetPlayers.some((p) => p.id === player.id)} mark={evidence[player.id] ?? 0} phase={game.phase} onSelect={() => setSelected(player.id)} />
-            ))}
+            {game.players.map((player, index) => {
+              const clueHeat = game.clues.filter((clue) => clue.suspect_ids.includes(player.id)).length * 24;
+              const leadHeat = game.public_leads.filter((lead) => lead.suspect_id === player.id).length * 18;
+              const readHeat = (game.read_summary[player.id]?.suspect ?? 0) * 12;
+              const suspicion = Math.min(100, clueHeat + leadHeat + readHeat + player.votes * 14);
+              return <PlayerCard key={player.id} player={player} index={index} self={player.id === game.me.id} host={player.id === game.host} accused={player.id === game.accused_id} selected={selected === player.id} selectable={targetPlayers.some((p) => p.id === player.id)} speaking={player.id === game.speaker_id} suspicion={suspicion} mark={evidence[player.id] ?? 0} phase={game.phase} onSelect={() => setSelected(player.id)} />;
+            })}
             {game.phase === "lobby" && Array.from({ length: Math.max(0, game.min_players - game.players.length) }).map((_, i) => <div className="empty-seat" key={i}><span>+</span><p>빈자리</p></div>)}
           </div>
           {game.phase === "lobby" && game.host === game.me.id && game.players.some((player) => player.id !== game.me.id) && <div className="host-roster-tools"><span>HOST CONTROL</span>{game.players.filter((player) => player.id !== game.me.id).map((player) => <button key={player.id} onClick={() => send({ t: "remove_seat", target: player.id })} aria-label={`${player.n} 대기실에서 내보내기`}><X size={11} />{player.n}</button>)}</div>}
@@ -947,6 +1018,7 @@ export default function GamePage() {
               <header><Search size={14} /><span><b>현장 감식 단서</b><small>{game.clues.length ? `${game.clues.length}개 확보 · 범인을 포함한 후보군` : "첫 번째 사건 보고를 기다리는 중"}</small></span></header>
               {game.clues.length ? <div>{game.clues.slice(-3).reverse().map((clue) => <article key={clue.id}><span>{clue.code}</span><b>{clue.title}</b><p>{clue.detail}</p><small>{clue.outcome} · DAY {clue.round}</small></article>)}</div> : <p className="forensic-empty">밤의 습격이 발생하면 감식반이 범인을 포함한 용의자 묶음을 공개합니다.</p>}
             </div>
+            {game.public_leads.length > 0 && <div className="public-leads"><header><LockKeyhole size={14} /><span><b>플레이어 공개 증거</b><small>진짜와 위조 증거는 같은 인장을 사용합니다</small></span></header>{game.public_leads.slice(-4).reverse().map((lead) => <article key={lead.id}><span>{lead.owner} 공개</span><b>{lead.title}</b><p>{lead.detail}</p></article>)}</div>}
             <div className="story-list">{game.story.slice(-5).map((line, i) => <div key={`${line}-${i}`} className={i === Math.min(4, game.story.length - 1) ? "latest" : ""}><span>{String(Math.max(0, game.story.length - 5) + i + 1).padStart(2, "0")}</span><p>{line}</p></div>)}</div>
             {game.phase === "gameover" && <div className="case-file"><b>사건 파일 · 최종 배역</b><div>{game.players.filter((p) => p.role).map((p) => <span key={p.id}>{p.n} — {p.role ? ROLE_META[p.role].name : "?"} · {p.score}점</span>)}</div></div>}
           </div>
@@ -965,11 +1037,19 @@ export default function GamePage() {
           </div>
         </aside>
       </div>
+      <div className={`mobile-command-dock command-${game.phase}`}>
+        <span><small>{game.phase === "night" ? "NIGHT ORDER" : game.phase === "vote" ? "SEALED BALLOT" : game.phase === "verdict" ? "FINAL VERDICT" : "CURRENT OBJECTIVE"}</small><b>{remaining > 0 ? `${remaining}초 · ` : ""}{currentDirective}</b></span>
+        {game.phase === "night" && game.me.alive && ["mafia", "doctor", "detective", "bodyguard"].includes(role) && <button className="primary" onClick={() => selected ? commitDecision("action") : setMobileTab("suspects")}>{selected ? "명령 봉인" : "대상 선택"}</button>}
+        {game.phase === "vote" && game.me.alive && <button className="danger" onClick={() => selected ? commitDecision("vote") : setMobileTab("suspects")}>{selected ? "표 봉인" : "용의자 선택"}</button>}
+        {game.phase === "day" && <button onClick={() => setMobileTab("talk")}>{isCurrentSpeaker ? "내 진술 열기" : "토론 참여"}</button>}
+        {game.phase === "defense" && <button onClick={() => setMobileTab("talk")}>{isAccused ? "최후 변론" : "변론 듣기"}</button>}
+        {game.phase === "verdict" && game.me.alive && !isAccused && <div><button onClick={() => commitJudgement(false)}>석방</button><button className="danger" onClick={() => commitJudgement(true)}>처형</button></div>}
+      </div>
       <nav className="mobile-game-nav" aria-label="모바일 게임 메뉴">
         <button className={mobileTab === "case" ? "active" : ""} onClick={() => setMobileTab("case")}><BookOpen size={19} /><span>사건</span>{game.clues.length > 0 && <i>{game.clues.length}</i>}</button>
         <button className={mobileTab === "suspects" ? "active" : ""} onClick={() => setMobileTab("suspects")}><Search size={19} /><span>수사</span></button>
         <button className={mobileTab === "talk" ? "active" : ""} onClick={() => setMobileTab("talk")}><MessageCircle size={19} /><span>대화</span>{game.chat.length > 0 && <i>{Math.min(9, game.chat.length)}</i>}</button>
-        <button className={mobileTab === "role" ? "active" : ""} onClick={() => setMobileTab("role")}><ShieldQuestion size={19} /><span>내 정보</span></button>
+        <button className={mobileTab === "role" ? "active" : ""} onClick={() => setMobileTab("role")}><ShieldQuestion size={19} /><span>{!game.me.alive && role !== "mafia" ? "사후 수사" : "내 정보"}</span></button>
       </nav>
       {tutorialOpen && <TutorialModal step={tutorialStep} setStep={setTutorialStep} onClose={closeTutorial} />}
       {inviteOpen && <InviteModal room={room} online={game.players.filter((player) => player.connected).length} copied={copied} onClose={() => setInviteOpen(false)} onCopy={copyInvite} onShare={shareInvite} onPoster={() => createPoster("invite")} />}
@@ -1084,11 +1164,22 @@ function RankingModal({ entries, signedIn, onClose }: { entries: LeaderboardEntr
   );
 }
 
-function PlayerCard({ player, index, self, host, accused, selected, selectable, mark, phase, onSelect }: { player: PlayerState; index: number; self: boolean; host: boolean; accused: boolean; selected: boolean; selectable: boolean; mark: -1 | 0 | 1; phase: GameState["phase"]; onSelect: () => void }) {
+function PrivateLeadCard({ lead, canReveal, onReveal }: { lead: NonNullable<GameState["me"]["private_lead"]>; canReveal: boolean; onReveal: () => void }) {
+  return <section className={`sealed-lead-card ${lead.revealed ? "revealed" : ""}`}><div className="lead-seal"><LockKeyhole size={18} /></div><span><small>PRIVATE EVIDENCE · 1회 공개</small><b>{lead.title}</b><p>{lead.detail}</p></span>{lead.revealed ? <em><Check size={13} />공개됨</em> : <button disabled={!canReveal} onClick={onReveal}>{canReveal ? "공식 증거로 공개" : "첫 낮에 공개 가능"}</button>}</section>;
+}
+
+function AfterlifePanel({ game, onPredict }: { game: GameState; onPredict: (target: string) => void }) {
+  const prediction = game.players.find((player) => player.id === game.me.ghost_prediction);
+  return <section className="afterlife-panel"><header><Eye size={17} /><span><small>AFTERLIFE INVESTIGATION</small><b>사후 수사실</b></span></header><p>당신의 목소리는 생존자에게 닿지 않습니다. 사건 기록을 보고 최종 마피아 한 명을 봉인하세요.</p><div>{game.players.filter((player) => player.alive && player.id !== game.me.id).map((player) => <button key={player.id} className={game.me.ghost_prediction === player.id ? "active" : ""} onClick={() => onPredict(player.id)} disabled={game.phase === "gameover"}><span className={`avatar-photo avatar-${Math.max(0, game.players.indexOf(player)) % 12}`} /><b>{player.n}</b>{game.me.ghost_prediction === player.id && <Check size={13} />}</button>)}</div>{prediction && <footer className={game.phase === "gameover" ? game.me.ghost_correct ? "correct" : "wrong" : ""}><LockKeyhole size={13} /><span>{game.phase === "gameover" ? game.me.ghost_correct ? `${prediction.n} — 범인 예측 적중` : `${prediction.n} — 예측 실패` : `${prediction.n}님을 최종 범인으로 봉인했습니다`}</span></footer>}</section>;
+}
+
+function PlayerCard({ player, index, self, host, accused, selected, selectable, speaking, suspicion, mark, phase, onSelect }: { player: PlayerState; index: number; self: boolean; host: boolean; accused: boolean; selected: boolean; selectable: boolean; speaking: boolean; suspicion: number; mark: -1 | 0 | 1; phase: GameState["phase"]; onSelect: () => void }) {
   return (
-    <button type="button" className={`player-card ${!player.alive ? "dead" : ""} ${accused ? "accused" : ""} ${selected ? "selected" : ""} ${selectable ? "selectable" : ""}`} onClick={selectable ? onSelect : undefined} disabled={!selectable}>
-      <div className="portrait"><span>{String(index + 1).padStart(2, "0")}</span><b className={`avatar-photo avatar-${index % 12}`} aria-label={`${player.n} 가상 인물 사진`} />{player.connected && <i />}{mark !== 0 && <em className={`intel-mark ${mark === -1 ? "suspect" : "safe"}`}>{mark === -1 ? "의심" : "안전"}</em>}</div>
-      <div className="player-info"><div><strong>{player.n}</strong>{self && <small>나</small>}{host && <small>방장</small>}{player.bot && <small>AI</small>}{player.voice && <Mic className="voice-presence-icon" size={12} />}{player.mafia && <Skull size={13} />}{player.id && phase === "gameover" && player.role && <small>{ROLE_META[player.role].name}</small>}</div><span>{!player.alive ? "사망" : phase === "lobby" ? host ? "시작 권한 보유" : player.ready ? "준비 완료" : "대기 중" : "생존"}</span></div>
+    <button type="button" className={`player-card ${!player.alive ? "dead" : ""} ${accused ? "accused" : ""} ${selected ? "selected" : ""} ${selectable ? "selectable" : ""} ${speaking ? "speaking" : ""}`} onClick={selectable ? onSelect : undefined} aria-disabled={!selectable}>
+      <div className="portrait"><span>{String(index + 1).padStart(2, "0")}</span><b className={`avatar-photo avatar-${index % 12}`} aria-label={`${player.n}의 증거물 토큰`} />{player.connected && <i />}{mark !== 0 && <em className={`intel-mark ${mark === -1 ? "suspect" : "safe"}`}>{mark === -1 ? "의심" : "안전"}</em>}</div>
+      {speaking && <div className="speaker-pulse"><i /><i /><i /><span>발언 중</span></div>}
+      <div className="player-info"><div><strong>{player.n}</strong>{self && <small>나</small>}{host && <small>방장</small>}{player.bot && <small>AI</small>}{player.voice && <Mic className="voice-presence-icon" size={12} />}{player.mafia && <Skull size={13} />}{player.id && phase === "gameover" && player.role && <small>{ROLE_META[player.role].name}</small>}</div><span>{!player.alive ? "사망" : phase === "lobby" ? host ? "시작 권한 보유" : player.ready ? "준비 완료" : "대기 중" : suspicion > 60 ? "집중 수사 대상" : "생존"}</span></div>
+      {phase !== "lobby" && player.alive && <div className="suspicion-meter" aria-label={`공개 의심도 ${suspicion}%`}><i style={{ width: `${suspicion}%` }} /><span>의심 {suspicion}%</span></div>}
       {player.votes > 0 && <div className="vote-count">{player.votes}표</div>}
       {accused && <div className="accused-mark"><Gavel size={12} />피고</div>}
       {selected && <div className="selected-mark"><Check size={14} /></div>}

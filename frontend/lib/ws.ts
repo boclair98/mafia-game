@@ -16,7 +16,7 @@
  * egress bytes, not open-time — §5b), so this costs nothing real.
  */
 
-export type ConnStatus = "connecting" | "open" | "reconnecting";
+export type ConnStatus = "connecting" | "open" | "reconnecting" | "failed";
 
 const PING_INTERVAL_MS = 20_000;
 const BACKOFF_BASE_MS = 500;
@@ -40,6 +40,7 @@ export function gameSocketUrl(room: string, nick: string, key: string): string {
 type Handlers = {
   onMessage: (msg: unknown) => void;
   onStatus: (status: ConnStatus) => void;
+  onFatal?: (reason: "room_full" | "removed_by_host") => void;
 };
 
 export class GameSocket {
@@ -56,13 +57,14 @@ export class GameSocket {
     this.connect();
   }
 
-  /** Send a JSON message; silently dropped unless the socket is open
-   *  (a lost input during a reconnect gap doesn't matter — the client
-   *  keeps sending fresh intent). */
-  send(msg: object): void {
+  /** Returns false when the caller needs to keep the user's input visible
+   *  and ask them to retry after the connection recovers. */
+  send(msg: object): boolean {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
+      return true;
     }
+    return false;
   }
 
   close(): void {
@@ -95,10 +97,16 @@ export class GameSocket {
     };
 
     // onerror always precedes onclose; reconnect logic lives in one place.
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (this.pingTimer) clearInterval(this.pingTimer);
       this.pingTimer = null;
       if (this.closed) return;
+      if (event.code === 4003 || event.code === 4004) {
+        this.closed = true;
+        this.handlers.onStatus("failed");
+        this.handlers.onFatal?.(event.code === 4004 ? "room_full" : "removed_by_host");
+        return;
+      }
       this.handlers.onStatus("reconnecting");
       // Exponential backoff with jitter so a fleet of clients doesn't
       // stampede the pod that just came back.

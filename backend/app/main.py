@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
@@ -22,6 +23,24 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
+)
+
+# Capacitor/WebView shells load the UI from a local origin while calling the
+# hosted API. Keep this allowlist exact: arbitrary web origins (and arbitrary
+# localhost ports) must not be able to make credentialed API requests.
+NATIVE_AND_WEB_ORIGINS = (
+    "https://localhost",
+    "capacitor://localhost",
+    "http://localhost",
+    "https://black-midnight.coders.kr",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=NATIVE_AND_WEB_ORIGINS,
+    allow_credentials=True,
+    allow_methods=("GET", "POST", "OPTIONS"),
+    allow_headers=("Accept", "Content-Type", "X-Requested-With"),
 )
 
 app.include_router(users_router)

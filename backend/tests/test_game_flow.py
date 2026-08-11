@@ -268,18 +268,132 @@ def test_day_discussion_allows_every_living_player_to_talk_while_spotlight_rotat
     assert "사망자" in room.add_chat("p4", "유령 발언")
 
 
-def test_ballot_feed_is_public_during_trial_and_persists_through_result():
+def test_ballot_feed_stays_sealed_until_trial_and_persists_through_result():
     room = room_with("mafia", "doctor", "detective", "citizen")
     room.phase = "vote"
     room.votes = {"p1": "p4", "p2": "p4", "p3": "p1"}
 
     state = room._state_for(room.players["p2"])
-    assert state["ballot_feed"][0] == {
-        "voter_id": "p1", "voter": "P1", "target_id": "p4", "target": "P4"
-    }
+    assert state["ballot_feed"] == []
+    assert all(player["votes"] == 0 for player in state["players"])
     room._resolve_vote()
     assert room.phase == "defense"
-    assert len(room._state_for(room.players["p2"])["ballot_feed"]) == 3
+    revealed = room._state_for(room.players["p2"])["ballot_feed"]
+    assert revealed[0] == {
+        "voter_id": "p1", "voter": "P1", "target_id": "p4", "target": "P4"
+    }
+    assert len(revealed) == 3
+    defense_state = room._state_for(room.players["p2"])
+    assert next(player for player in defense_state["players"] if player["id"] == "p4")["votes"] == 2
+
+
+def test_private_leads_are_isolated_and_can_be_publicly_revealed_once():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.round = 1
+    room.private_leads = {
+        "p1": {
+            "id": "lead-p1",
+            "title": "봉인 훼손 감정",
+            "detail": "P3님의 좌석 주변에서 왁스 조각이 발견됐습니다.",
+            "suspect_id": "p3",
+            "revealed": False,
+            "authentic": False,
+        },
+        "p2": {
+            "id": "lead-p2",
+            "title": "출입 시각 기록",
+            "detail": "P1님의 출입 기록이 사건 시각과 겹칩니다.",
+            "suspect_id": "p1",
+            "revealed": False,
+            "authentic": True,
+        },
+    }
+    room.phase = "day"
+
+    p1_state = room._state_for(room.players["p1"])
+    p2_state = room._state_for(room.players["p2"])
+    assert p1_state["me"]["private_lead"]["id"] == "lead-p1"
+    assert p2_state["me"]["private_lead"]["id"] == "lead-p2"
+    assert "authentic" not in p1_state["me"]["private_lead"]
+    assert p1_state["public_leads"] == []
+
+    assert room.reveal_private_lead("p2", "lead-p1") == "공개할 수 없는 증거입니다."
+    assert room.reveal_private_lead("p1", "lead-p1") is None
+    assert room.reveal_private_lead("p1", "lead-p1") == "이미 공개한 증거입니다."
+
+    public = room._state_for(room.players["p2"])["public_leads"][0]
+    assert public == {
+        "id": "lead-p1",
+        "owner_id": "p1",
+        "owner": "P1",
+        "title": "봉인 훼손 감정",
+        "detail": "P3님의 좌석 주변에서 왁스 조각이 발견됐습니다.",
+        "round": 1,
+        "suspect_id": "p3",
+    }
+    assert "authentic" not in public
+    assert room.case_log[-1] == "봉인 증거 공개 — P1: 봉인 훼손 감정"
+
+
+def test_private_lead_reveal_requires_a_living_player_during_day():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.private_leads["p2"] = {
+        "id": "lead-p2",
+        "title": "출입 시각 기록",
+        "detail": "P1님의 출입 기록이 사건 시각과 겹칩니다.",
+        "suspect_id": "p1",
+        "revealed": False,
+        "authentic": True,
+    }
+
+    room.phase = "night"
+    assert "낮 토론" in room.reveal_private_lead("p2", "lead-p2")
+    room.phase = "day"
+    room.players["p2"].alive = False
+    assert "생존자" in room.reveal_private_lead("p2", "lead-p2")
+    assert list(room.public_leads) == []
+
+
+def test_start_deals_one_private_lead_per_playable_seat_without_truth_marker():
+    room = room_with("citizen")
+    room.fill_bots("p1", 4)
+
+    assert room.start("p1") is None
+    assert set(room.private_leads) == set(room.players)
+    for participant in room.players.values():
+        lead = room._state_for(participant)["me"]["private_lead"]
+        assert lead is not None
+        assert lead["suspect_id"] != participant.id
+        assert lead["suspect_id"] in room.players
+        assert "authentic" not in lead
+
+
+def test_dead_player_can_predict_a_living_mafia_and_result_stays_private_until_end():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.round = 1
+    room.phase = "day"
+    room.players["p4"].alive = False
+
+    room.players["p1"].alive = False
+    assert "마피아" in room.ghost_predict("p1", "p2")
+    room.players["p1"].alive = True
+
+    assert "사망한 플레이어" in room.ghost_predict("p2", "p1")
+    assert "생존한 용의자" in room.ghost_predict("p4", "p4")
+    assert room.ghost_predict("p4", "p1") is None
+
+    during_match = room._state_for(room.players["p4"])["me"]
+    assert during_match["ghost_prediction"] == "p1"
+    assert during_match["ghost_correct"] is False
+    assert room._state_for(room.players["p2"])["me"]["ghost_prediction"] is None
+    assert "보너스 15점" in room._guide_for(room.players["p4"])
+
+    room._finish("citizen")
+    at_gameover = room._state_for(room.players["p4"])["me"]
+    assert at_gameover["ghost_prediction"] == "p1"
+    assert at_gameover["ghost_correct"] is True
+    assert room.players["p4"].score == 118
+    assert "지금" in room.ghost_predict("p4", "p1")
 
 
 def test_night_victim_can_leave_one_public_will_at_dawn():
@@ -340,10 +454,16 @@ def test_rematch_erases_previous_public_and_mafia_chat():
         {"id": "a", "from": "P1", "text": "secret", "visibility": "mafia", "at": 1},
         {"id": "b", "from": "P2", "text": "public", "visibility": "all", "at": 2},
     ])
+    room.private_leads["p1"] = {"id": "old-private-lead"}
+    room.public_leads.append({"id": "old-public-lead"})
+    room.ghost_predictions["p4"] = "p1"
 
     assert room.rematch("p1") is None
     assert room.phase == "lobby"
     assert list(room.chat) == []
+    assert room.private_leads == {}
+    assert list(room.public_leads) == []
+    assert room.ghost_predictions == {}
 
 
 def test_public_presence_counts_humans_without_exposing_bot_seats():

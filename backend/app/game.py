@@ -94,6 +94,15 @@ CASE_PROFILES = [
     {"id": "observatory", "code": "BM-042", "title": "관측소의 00시 42분", "location": "북악 천문 관측소", "victim": "천문학자 강이안", "briefing": "관측 기록이 끊긴 90초 사이 사건이 벌어졌습니다. 남겨진 신호는 내부자의 암호입니다."},
 ]
 
+LEAD_TEMPLATES = [
+    ("출입 시각 기록", "{suspect}님의 출입 기록이 사건 추정 시각과 4분 겹칩니다."),
+    ("젖은 외투의 흔적", "현장 창가의 빗물 성분이 {suspect}님의 좌석 주변에서 발견됐습니다."),
+    ("봉인 훼손 감정", "증거 봉투의 왁스 조각이 {suspect}님이 있던 구역과 같은 성분입니다."),
+    ("통화 기록 공백", "{suspect}님의 기기만 사건 전후 6분간 네트워크에서 사라졌습니다."),
+    ("목격 진술 조각", "정전 직전 {suspect}님과 비슷한 체격의 인물이 복도를 지났습니다."),
+    ("잔류 향 성분", "현장에 남은 향 성분이 {suspect}님의 소지품과 일부 일치합니다."),
+]
+
 
 def clean_room_name(raw: str | None) -> str:
     if not raw:
@@ -164,6 +173,9 @@ class Room:
         self.pace = "quick"
         self.case_profile = random.choice(CASE_PROFILES)
         self.reports: deque[dict[str, Any]] = deque(maxlen=100)
+        self.private_leads: dict[str, dict[str, Any]] = {}
+        self.public_leads: deque[dict[str, Any]] = deque(maxlen=18)
+        self.ghost_predictions: dict[str, str] = {}
         self._bot_marks: set[str] = set()
         self._bot_suspicions: dict[str, str] = {}
         self._task: asyncio.Task | None = None
@@ -431,6 +443,9 @@ class Room:
         self.claims.clear()
         self.moments.clear()
         self.clues.clear()
+        self.private_leads.clear()
+        self.public_leads.clear()
+        self.ghost_predictions.clear()
         self.reads.clear()
         self.wills.clear()
         self.interrogation_order.clear()
@@ -440,6 +455,7 @@ class Room:
         self.last_death_id = None
         self._record(f"사건 {self.case_profile['code']} · {self.case_profile['title']}. 현장이 봉쇄되었습니다.")
         self._record(self.case_profile["briefing"])
+        self._deal_private_leads(active)
         self._bot_marks.clear()
         self._bot_suspicions.clear()
         self._set_phase("reveal", self._seconds("reveal"))
@@ -469,6 +485,9 @@ class Room:
         self.claims.clear()
         self.moments.clear()
         self.clues.clear()
+        self.private_leads.clear()
+        self.public_leads.clear()
+        self.ghost_predictions.clear()
         self.reads.clear()
         self.wills.clear()
         self.interrogation_order.clear()
@@ -631,6 +650,73 @@ class Room:
             {"id": secrets.token_hex(4), "from": player.nick, "from_id": player.id, "text": text,
              "visibility": visibility, "at": int(now * 1000)}
         )
+        return None
+
+    def _deal_private_leads(self, active: list[Player]) -> None:
+        """Give every player a plausible first-day talking point.
+
+        A lead always names a playable suspect but never proves alignment. Mafia
+        receives one fabricated lead that looks identical after publication.
+        """
+        suspects = [player for player in active if player.role != "spectator"]
+        mafia = [player for player in suspects if player.role == "mafia"]
+        non_mafia = [player for player in suspects if player.role != "mafia"]
+        truth_holder = random.choice(non_mafia) if non_mafia and mafia else None
+        for owner in suspects:
+            pool = [player for player in suspects if player.id != owner.id]
+            if not pool:
+                continue
+            # Exactly one genuine packet crosses a mafia route. The remaining
+            # observations are plausible false positives, so mass disclosure
+            # cannot identify the mafia by simple frequency counting.
+            if truth_holder and owner.id == truth_holder.id:
+                suspect = random.choice(mafia)
+            else:
+                decoys = [player for player in pool if player.role != "mafia"]
+                suspect = random.choice(decoys or pool)
+            title, template = random.choice(LEAD_TEMPLATES)
+            self.private_leads[owner.id] = {
+                "id": secrets.token_hex(5),
+                "title": title,
+                "detail": template.format(suspect=suspect.nick),
+                "suspect_id": suspect.id,
+                "revealed": False,
+                "authentic": owner.role != "mafia",
+            }
+
+    def reveal_private_lead(self, pid: str, lead_id: str) -> str | None:
+        player = self.players.get(pid)
+        lead = self.private_leads.get(pid)
+        if self.phase != "day" or not player or not player.alive:
+            return "낮 토론 중인 생존자만 증거를 공개할 수 있습니다."
+        if not lead or lead["id"] != lead_id:
+            return "공개할 수 없는 증거입니다."
+        if lead["revealed"]:
+            return "이미 공개한 증거입니다."
+        lead["revealed"] = True
+        public = {
+            "id": lead["id"], "owner_id": player.id, "owner": player.nick,
+            "title": lead["title"], "detail": lead["detail"],
+            "round": self.round, "suspect_id": lead["suspect_id"],
+        }
+        self.public_leads.append(public)
+        line = f"봉인 증거 공개 — {player.nick}: {lead['title']}"
+        self._record(line)
+        self._moment("evidence", line, actor=pid, target=lead["suspect_id"])
+        return None
+
+    def ghost_predict(self, pid: str, target_id: str) -> str | None:
+        player = self.players.get(pid)
+        target = self.players.get(target_id)
+        if not player or player.alive or player.role == "spectator":
+            return "사망한 플레이어만 사후 수사를 진행할 수 있습니다."
+        if player.role == "mafia":
+            return "마피아는 동료의 정체를 알고 있어 사후 범인 예측에 참여할 수 없습니다."
+        if self.phase in {"lobby", "reveal", "gameover"}:
+            return "지금은 사후 예측을 봉인할 수 없습니다."
+        if not target or not target.alive or target.role == "spectator":
+            return "생존한 용의자를 선택해 주세요."
+        self.ghost_predictions[pid] = target_id
         return None
 
     def report_player(self, pid: str, target_id: str, raw_reason: str) -> str | None:
@@ -999,6 +1085,9 @@ class Room:
                     stance == "trust" and target.role not in {"mafia", "trickster"}
                 )):
                     p.score += 3
+            prediction = self.players.get(self.ghost_predictions.get(p.id, ""))
+            if p.role != "mafia" and prediction and prediction.role == "mafia":
+                p.score += 15
         self._set_phase("gameover", 0)
         if not any(player.coders_id is not None for player in self.players.values()):
             return
@@ -1030,8 +1119,10 @@ class Room:
             return "처음이라면 AI 플레이어를 채워 연습해 보세요. 퀵은 약 12분, 클래식은 20분 이상 깊게 토론하는 흐름입니다."
         if self.phase == "reveal":
             return f"당신은 {ROLE_NAMES.get(viewer.role, viewer.role)}입니다. 역할 카드는 다른 사람에게 보이지 않으니 승리 조건부터 확인하세요."
+        if not viewer.alive and viewer.role == "mafia":
+            return "당신은 이미 마피아 동료를 알고 있습니다. 공개 사건 기록을 보며 팀의 결말을 지켜보세요."
         if not viewer.alive:
-            return "탈락해도 사건은 계속됩니다. 채팅과 투표 흐름을 보며 누가 거짓말했는지 추리해 보세요."
+            return "사후 수사실에서 생존한 마피아를 예측해 보세요. 사건 종료 시 적중하면 보너스 15점을 받습니다."
         if self.phase == "night":
             tips = {
                 "mafia": "동료와 목표를 맞추세요. 낮에 의심받지 않을 알리바이도 미리 준비해야 합니다.",
@@ -1050,7 +1141,7 @@ class Room:
                 return f"최근 조사 기록: {viewer.intel[-1]} 공개할지, 한 턴 더 숨길지 판단하세요."
             return "한 사람을 몰아가기보다 각자 ‘어젯밤 누구를 선택했는지’ 물어보면 모순을 찾기 쉽습니다."
         if self.phase == "vote":
-            return "표가 실시간 공개됩니다. 광대는 처형되면 혼자 승리하므로 단순히 수상하다는 이유만으로 찍지 마세요."
+            return "투표 대상은 공개되지 않고 봉인 완료 인원만 표시됩니다. 광대는 처형되면 혼자 승리하므로 단순히 수상하다는 이유만으로 찍지 마세요."
         if self.phase == "defense":
             if viewer.id == self.accused_id:
                 return "최후 변론 시간입니다. 표가 몰린 이유를 반박하고, 확인 가능한 사실을 짧게 제시하세요."
@@ -1067,7 +1158,11 @@ class Room:
         return "역할 공개와 사건 기록을 비교해 승부를 가른 거짓말을 찾아보세요."
 
     def _state_for(self, viewer: Player) -> dict:
-        vote_counts = Counter(self.votes.values()) if self.phase == "vote" else Counter()
+        vote_counts = (
+            Counter(self.votes.values())
+            if self.phase in {"defense", "verdict", "result", "gameover"}
+            else Counter()
+        )
         now_ms = int(time.time() * 1000)
         recent_reactions = [reaction for reaction in self.reactions if now_ms - int(reaction["at"]) <= 5500]
         visible_chat = [
@@ -1086,7 +1181,10 @@ class Room:
             if key.startswith(f"{self.round}:")
         }
         show_read_summary = self.phase in {"vote", "defense", "verdict", "result", "gameover"}
-        show_ballot_feed = self.phase in {"vote", "defense", "verdict", "result", "gameover"}
+        # Votes stay sealed while the ballot is open.  The complete feed is
+        # revealed together once the room enters the defense/results flow so a
+        # late voter cannot simply copy the public majority.
+        show_ballot_feed = self.phase in {"defense", "verdict", "result", "gameover"}
         read_summary: dict[str, dict[str, int]] = {}
         if show_read_summary:
             for target in self.players.values():
@@ -1103,6 +1201,7 @@ class Room:
             "t": "state",
             "room": self.name,
             "case_profile": self.case_profile,
+            "public_leads": list(self.public_leads),
             "phase": self.phase,
             "round": self.round,
             "deadline": round(self.deadline * 1000),
@@ -1141,6 +1240,16 @@ class Room:
                     self.phase == "dawn" and viewer.id == self.last_death_id
                     and viewer.id not in self.wills
                 ),
+                "private_lead": (
+                    {k: v for k, v in self.private_leads.get(viewer.id, {}).items() if k != "authentic"}
+                    or None
+                ),
+                "ghost_prediction": self.ghost_predictions.get(viewer.id),
+                "ghost_correct": (
+                    self.phase == "gameover"
+                    and self.ghost_predictions.get(viewer.id) in self.players
+                    and self.players[self.ghost_predictions[viewer.id]].role == "mafia"
+                ) if viewer.id in self.ghost_predictions else None,
             },
             "accused_id": self.accused_id,
             "judgement_counts": {

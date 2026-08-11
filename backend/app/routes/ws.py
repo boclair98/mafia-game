@@ -108,6 +108,14 @@ async def game_socket(
                     error = arena.add_reaction(player.id, str(msg.get("emoji", "")))
                 case "chat":
                     error = arena.add_chat(player.id, str(msg.get("text", "")))
+                case "reveal_lead":
+                    error = arena.reveal_private_lead(
+                        player.id, str(msg.get("lead_id", ""))
+                    )
+                case "ghost_predict":
+                    error = arena.ghost_predict(
+                        player.id, str(msg.get("target", ""))
+                    )
                 case "report":
                     error = arena.report_player(
                         player.id,

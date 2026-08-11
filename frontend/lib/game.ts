@@ -24,6 +24,8 @@ export type SealedClaim = { id: string; speaker_id: string; speaker: string; tex
 export type CaseMoment = { id: string; kind: string; text: string; actor: string | null; target: string | null; round: number };
 export type BallotEntry = { voter_id: string; voter: string; target_id: string; target: string };
 export type CaseClue = { id: string; code: string; round: number; title: string; detail: string; outcome: string; suspect_ids: string[]; suspects: string[] };
+export type PrivateLead = { id: string; title: string; detail: string; suspect_id: string; revealed: boolean };
+export type PublicLead = { id: string; owner_id: string; owner: string; title: string; detail: string; round: number; suspect_id: string };
 
 export type GameState = {
   t: "state";
@@ -49,10 +51,14 @@ export type GameState = {
     mission: string;
     reads: Record<string, ReadStance>;
     can_leave_will: boolean;
+    private_lead: PrivateLead | null;
+    ghost_prediction: string | null;
+    ghost_correct: boolean | null;
   };
   story: string[];
   case_log: string[];
   clues: CaseClue[];
+  public_leads: PublicLead[];
   accused_id: string | null;
   judgement_counts: { execute: number; spare: number };
   decision_progress: { completed: number; total: number };
