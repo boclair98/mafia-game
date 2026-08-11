@@ -15,7 +15,8 @@ export type PlayerState = {
   voice: boolean;
 };
 
-export type ChatMessage = { id: string; from: string; text: string; at: number };
+export type ChatMessage = { id: string; from: string; from_id?: string; text: string; at: number };
+export type CaseProfile = { id: string; code: string; title: string; location: string; victim: string; briefing: string };
 export type ReactionState = { id: string; from: string; emoji: string; at: number };
 export type ReadStance = "trust" | "hold" | "suspect";
 export type InterrogationQuestion = { id: string; from: string; from_id: string; speaker_id: string; text: string; round: number; at: number };
@@ -27,6 +28,7 @@ export type CaseClue = { id: string; code: string; round: number; title: string;
 export type GameState = {
   t: "state";
   room: string;
+  case_profile: CaseProfile;
   phase: Phase;
   round: number;
   deadline: number;

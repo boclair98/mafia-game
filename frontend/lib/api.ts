@@ -12,6 +12,15 @@
 
 import { tracked } from "./warming";
 
+export const NATIVE_API_ORIGIN = "https://black-midnight.coders.kr";
+
+export function apiUrl(path: string): string {
+  if (typeof location === "undefined") return path;
+  const configured = process.env.NEXT_PUBLIC_API_ORIGIN?.replace(/\/$/, "");
+  const nativeShell = process.env.NODE_ENV === "production" && location.hostname === "localhost";
+  return `${configured || (nativeShell ? NATIVE_API_ORIGIN : "")}${path}`;
+}
+
 export type LeaderboardEntry = {
   name: string;
   best_score: number;
@@ -27,7 +36,7 @@ export type GameStatus = {
 
 export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
   return tracked(async () => {
-    const r = await fetch("/api/leaderboard", { credentials: "include" });
+    const r = await fetch(apiUrl("/api/leaderboard"), { credentials: "include" });
     if (!r.ok) return [];
     return r.json();
   });
@@ -35,7 +44,7 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
 
 export async function fetchGameStatus(): Promise<GameStatus | null> {
   return tracked(async () => {
-    const r = await fetch("/api/status", { credentials: "include" });
+    const r = await fetch(apiUrl("/api/status"), { credentials: "include" });
     if (!r.ok) return null;
     return r.json();
   });

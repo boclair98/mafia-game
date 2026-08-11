@@ -5,9 +5,13 @@
 
 > 한 명이 죽었다. 범인은 아직 이 방 안에 있다.
 
+Web, Android, iOS에서 같은 실시간 사건을 공유하는 모바일 우선 소셜 추리 게임입니다. `frontend/android`와 `frontend/ios`에는 Capacitor 네이티브 프로젝트가 포함되어 있으며, 웹 빌드 후 `pnpm native:sync`로 앱 셸을 갱신할 수 있습니다.
+
 검은 자정은 4~12명이 모바일 또는 PC 브라우저에서 플레이하는 실시간 살인사건 추리 마피아 게임입니다. 밤마다 범인이 움직이고, 새벽에는 현장 감식 단서가 도착합니다. 플레이어는 음성 토론과 알리바이, 공개 투표 기록을 대조해 범인을 찾아야 합니다.
 
 별도 설치나 회원가입 없이 바로 시작할 수 있습니다.
+
+스토어 심사와 운영 준비 자료는 [출시 체크리스트](docs/STORE_RELEASE_CHECKLIST.md), [개인정보 처리방침](docs/PRIVACY.md), [커뮤니티 가이드라인](docs/COMMUNITY_GUIDELINES.md)에 정리되어 있습니다.
 
 **운영 서비스:** [https://black-midnight.coders.kr](https://black-midnight.coders.kr)
 

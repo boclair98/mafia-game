@@ -108,6 +108,17 @@ async def game_socket(
                     error = arena.add_reaction(player.id, str(msg.get("emoji", "")))
                 case "chat":
                     error = arena.add_chat(player.id, str(msg.get("text", "")))
+                case "report":
+                    error = arena.report_player(
+                        player.id,
+                        str(msg.get("target", "")),
+                        str(msg.get("reason", "")),
+                    )
+                    if not error:
+                        await ws.send_text(json.dumps(
+                            {"t": "notice", "message": "신고가 접수되었습니다. 해당 사용자는 즉시 차단할 수도 있습니다."},
+                            ensure_ascii=False,
+                        ))
                 case "question":
                     error = arena.add_question(player.id, str(msg.get("text", "")))
                 case "claim":

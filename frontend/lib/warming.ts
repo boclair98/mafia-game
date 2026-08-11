@@ -60,7 +60,8 @@ async function probeWarm(timeoutMs: number): Promise<boolean> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    await fetch(`/api/health/live?t=${Date.now()}`, {
+    const nativeOrigin = process.env.NODE_ENV === "production" && location.hostname === "localhost" ? "https://black-midnight.coders.kr" : "";
+    await fetch(`${nativeOrigin}/api/health/live?t=${Date.now()}`, {
       signal: ctrl.signal,
       cache: "no-store",
     });

@@ -1,10 +1,10 @@
 "use client";
 
 import {
-  Activity, Bot, BookOpen, Check, ChevronLeft, ChevronRight, Clipboard, Crosshair, Download, Eye, Film, Gavel,
+  Activity, Ban, Bot, BookOpen, Check, ChevronLeft, ChevronRight, Clipboard, Crosshair, Download, Eye, FileText, Film, Flag, Gavel,
   Headphones, HeartPulse, LockKeyhole, LogIn, MessageCircle, Mic, MicOff, Moon, PhoneOff, Radio, RotateCcw, Search, Send, Siren,
-  Share2, ShieldCheck, ShieldQuestion, Skull, Smartphone, Sparkles,
-  TimerReset, Trophy, UserPlus, Users, Volume2, VolumeX, Vote, X,
+  Settings, Share2, ShieldCheck, ShieldQuestion, Skull, Smartphone, Sparkles,
+  TimerReset, Trophy, UserPlus, Users, Volume2, Vote, X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
@@ -30,6 +30,7 @@ type InstallPromptEvent = Event & {
 };
 
 type LocalStats = { games: number; wins: number; streak: number };
+type LegalPage = "terms" | "privacy" | "community";
 
 const PHASE_META = {
   lobby: ["용의자 대기실", "모두가 정체를 숨기면 자정의 사건이 시작됩니다."],
@@ -160,6 +161,12 @@ export default function GamePage() {
   const [voiceChatOn, setVoiceChatOn] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [soundOn, setSoundOn] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [legalPage, setLegalPage] = useState<LegalPage | null>(null);
+  const [reportTarget, setReportTarget] = useState<{ id: string; name: string } | null>(null);
+  const [reportReason, setReportReason] = useState("괴롭힘 또는 혐오 발언");
+  const [blockedPlayers, setBlockedPlayers] = useState<string[]>([]);
   const [evidence, setEvidence] = useState<Record<string, -1 | 0 | 1>>({});
   const [mobileTab, setMobileTab] = useState<"case" | "suspects" | "talk" | "role">("suspects");
   const [phaseAlert, setPhaseAlert] = useState<GameState["phase"] | null>(null);
@@ -177,7 +184,7 @@ export default function GamePage() {
     ["lobby", "day", "vote", "gameover"].includes(game.phase)
     || (game.phase === "defense" && game.me.id === game.accused_id)
   ));
-  const voicePeerKey = game?.players.filter((player) => player.voice && !player.bot && player.id !== game.me.id).map((player) => player.id).sort().join("|") ?? "";
+  const voicePeerKey = game?.players.filter((player) => player.voice && !player.bot && player.id !== game.me.id && !blockedPlayers.includes(player.id)).map((player) => player.id).sort().join("|") ?? "";
   const myVoicePresent = game?.players.find((player) => player.id === game.me.id)?.voice ?? false;
 
   useEffect(() => {
@@ -195,6 +202,8 @@ export default function GamePage() {
       if (!localStorage.getItem("black-midnight:tutorial-seen")) setTutorialOpen(true);
       setVoiceOn(localStorage.getItem("black-midnight:voice") === "1");
       setSoundOn(localStorage.getItem("black-midnight:sound") === "1");
+      setTermsAccepted(localStorage.getItem("black-midnight:terms-v1") === "1");
+      try { setBlockedPlayers(JSON.parse(localStorage.getItem("black-midnight:blocked") || "[]") as string[]); } catch { localStorage.removeItem("black-midnight:blocked"); }
     });
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
     const onInstall = (event: Event) => {
@@ -240,13 +249,16 @@ export default function GamePage() {
   }, []);
 
   useEffect(() => {
-    const modalOpen = tutorialOpen || inviteOpen || caseOpen || rankingOpen;
+    const modalOpen = tutorialOpen || inviteOpen || caseOpen || rankingOpen || settingsOpen || Boolean(legalPage) || Boolean(reportTarget);
     if (!modalOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const closeTopModal = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (caseOpen) setCaseOpen(false);
+      else if (reportTarget) setReportTarget(null);
+      else if (legalPage) setLegalPage(null);
+      else if (settingsOpen) setSettingsOpen(false);
       else if (rankingOpen) setRankingOpen(false);
       else if (inviteOpen) setInviteOpen(false);
       else if (tutorialOpen) {
@@ -259,7 +271,7 @@ export default function GamePage() {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", closeTopModal);
     };
-  }, [caseOpen, inviteOpen, rankingOpen, tutorialOpen]);
+  }, [caseOpen, inviteOpen, legalPage, rankingOpen, reportTarget, settingsOpen, tutorialOpen]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -375,7 +387,7 @@ export default function GamePage() {
     const socket = new GameSocket(gameSocketUrl(room, nick, key), {
       onStatus: setStatus,
       onMessage: (raw) => {
-        const msg = raw as WelcomeMsg | GameState | { t: "error"; message: string } | { t: "voice_signal"; from: string; data: VoiceSignal };
+        const msg = raw as WelcomeMsg | GameState | { t: "error" | "notice"; message: string } | { t: "voice_signal"; from: string; data: VoiceSignal };
         if (msg.t === "welcome") {
           setWelcome(msg as WelcomeMsg);
         } else if (msg.t === "state") {
@@ -404,7 +416,7 @@ export default function GamePage() {
             },
           });
           setSelected((current) => current && next.players.some((p) => p.id === current && p.alive) ? current : null);
-        } else if (msg.t === "error") {
+        } else if (msg.t === "error" || msg.t === "notice") {
           setNotice(msg.message);
           window.setTimeout(() => setNotice(""), 3200);
         } else if (msg.t === "voice_signal") {
@@ -431,7 +443,8 @@ export default function GamePage() {
     event.preventDefault();
     const safeNick = nick.trim().slice(0, 16);
     const safeRoom = roomInput.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || makeRoom();
-    if (!safeNick) return;
+    if (!safeNick || !termsAccepted) return;
+    localStorage.setItem("black-midnight:terms-v1", "1");
     localStorage.setItem("black-midnight:nick", safeNick);
     history.replaceState(null, "", `?room=${encodeURIComponent(safeRoom)}`);
     setNick(safeNick);
@@ -440,6 +453,19 @@ export default function GamePage() {
   };
 
   const send = (message: object) => socketRef.current?.send(message);
+  const blockPlayer = (id: string, name: string) => {
+    const next = blockedPlayers.includes(id) ? blockedPlayers.filter((item) => item !== id) : [...blockedPlayers, id];
+    setBlockedPlayers(next);
+    localStorage.setItem("black-midnight:blocked", JSON.stringify(next));
+    setNotice(next.includes(id) ? `${name}님을 차단했습니다. 대화와 음성이 숨겨집니다.` : `${name}님의 차단을 해제했습니다.`);
+    window.setTimeout(() => setNotice(""), 3200);
+  };
+  const submitReport = (event: FormEvent) => {
+    event.preventDefault();
+    if (!reportTarget) return;
+    send({ t: "report", target: reportTarget.id, reason: reportReason });
+    setReportTarget(null);
+  };
   const me = game?.players.find((player) => player.id === game.me.id);
   const role = game?.me.role || "citizen";
   const roleMeta = ROLE_META[role];
@@ -734,7 +760,7 @@ export default function GamePage() {
       <main className="landing-shell">
         <div className="grain" />
         <div className="landing-atmosphere" aria-hidden="true"><i /><i /><i /><span /></div>
-        <header className="landing-nav"><div><Search size={17} /><b>검은 자정 · 사건 파일</b></div><span><i />INVESTIGATION NETWORK{networkStatus ? ` · ${networkStatus.players}명 접속 · ${networkStatus.active_matches}건 수사 중` : ""}</span></header>
+        <header className="landing-nav"><div><Search size={17} /><b>검은 자정 · 사건 파일</b></div><button className="landing-settings" onClick={() => setSettingsOpen(true)} aria-label="설정과 운영 정책"><Settings size={16} /></button><span><i />INVESTIGATION NETWORK{networkStatus ? ` · ${networkStatus.players}명 접속 · ${networkStatus.active_matches}건 수사 중` : ""}</span></header>
         <div className="city-coordinate"><span>37°34&apos;N · 126°58&apos;E</span><b>MIDNIGHT DISTRICT / LIVE FEED 00:42</b></div>
         <section className="landing-copy">
           <div className="eyebrow"><span /> INTERACTIVE MURDER MYSTERY</div>
@@ -770,7 +796,8 @@ export default function GamePage() {
           <form onSubmit={submitJoin}>
             <label><span>당신의 이름 <em>{nick.length}/16</em></span><input id="landing-nick" value={nick} onChange={(e) => setNick(e.target.value)} placeholder="게임에서 불릴 이름" maxLength={16} /></label>
             <label><span>비밀 방 코드 <em>{invitedByLink ? "초대 링크에서 확인됨" : "친구와 공유할 코드"}</em></span><div className="room-field"><input value={roomInput} onChange={(e) => { setRoomInput(e.target.value); setInvitedByLink(false); }} maxLength={32} /><button type="button" onClick={() => { setRoomInput(makeRoom()); setInvitedByLink(false); }} aria-label="새 방 코드 만들기"><RotateCcw size={15} /></button></div></label>
-            <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim()}><LogIn size={18} /><span>{nick.trim() ? `${nick.trim()}으로 수사 합류` : "이름을 입력하고 수사 합류"}</span><ChevronRight size={16} /></button>
+            <label className="terms-check"><input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span><b>커뮤니티 규칙과 이용약관에 동의합니다</b><small><button type="button" onClick={() => setLegalPage("terms")}>이용약관</button> · <button type="button" onClick={() => setLegalPage("community")}>커뮤니티 가이드</button> · <button type="button" onClick={() => setLegalPage("privacy")}>개인정보</button></small></span></label>
+            <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim() || !termsAccepted}><LogIn size={18} /><span>{!termsAccepted ? "규칙에 동의하고 입장" : nick.trim() ? `${nick.trim()}으로 수사 합류` : "이름을 입력하고 수사 합류"}</span><ChevronRight size={16} /></button>
           </form>
           {installPrompt && <button className="install-button" type="button" onClick={installApp}><Smartphone size={16} /> 홈 화면에 앱 설치</button>}
           <div className="join-proof"><span><Check size={12} />설치 없음</span><span><Check size={12} />AI 인원 채우기</span><span><Check size={12} />실시간 음성</span></div>
@@ -778,6 +805,8 @@ export default function GamePage() {
         </section>
         {tutorialOpen && <TutorialModal step={tutorialStep} setStep={setTutorialStep} onClose={closeTutorial} />}
         {rankingOpen && <RankingModal entries={leaderboard} signedIn={Boolean(identity)} onClose={() => setRankingOpen(false)} />}
+        {settingsOpen && <SettingsModal voiceOn={voiceOn} soundOn={soundOn} onVoice={toggleVoice} onSound={toggleSound} onLegal={setLegalPage} onClose={() => setSettingsOpen(false)} />}
+        {legalPage && <LegalModal page={legalPage} onClose={() => setLegalPage(null)} />}
       </main>
     );
   }
@@ -806,14 +835,14 @@ export default function GamePage() {
         </div>
       )}
       <header className="topbar">
-        <div className="mini-brand"><Moon size={18} fill="currentColor" /><span>검은 자정</span><button className="guide-button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}><Film size={13} />룰 안내</button><button className="guide-button" onClick={() => setRankingOpen(true)}><Trophy size={13} />랭킹</button><button className={`guide-button ${voiceOn ? "active" : ""}`} onClick={toggleVoice} aria-label="게임 진행 음성 켜기 또는 끄기">{voiceOn ? <Volume2 size={13} /> : <VolumeX size={13} />}진행 음성</button><button className={`guide-button ${soundOn ? "active" : ""}`} onClick={toggleSound} aria-label="게임 효과음 켜기 또는 끄기">{soundOn ? <Radio size={13} /> : <VolumeX size={13} />}효과음</button></div>
+        <div className="mini-brand"><Moon size={18} fill="currentColor" /><span>검은 자정</span><button className="guide-button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}><Film size={13} />룰 안내</button><button className="guide-button" onClick={() => setRankingOpen(true)}><Trophy size={13} />랭킹</button><button className="guide-button" onClick={() => setSettingsOpen(true)}><Settings size={13} />설정</button></div>
         <div className="room-pill"><span>ROOM</span><b>{room}</b><button onClick={copyInvite} aria-label="초대 링크 복사">{copied ? <Check size={15} /> : <Clipboard size={15} />}</button><button onClick={() => setInviteOpen(true)} aria-label="친구 초대 열기"><UserPlus size={15} /></button></div>
         <div className={`connection ${status}`}><i />{status === "open" ? `${game.players.filter((p) => p.connected).length}명 접속` : "재연결 중"}</div>
       </header>
 
       <section className="phase-banner">
         <div className="threat-monitor"><div><Siren size={14} /><span>CITY THREAT</span><b>{cityThreat}%</b></div><div className="threat-bar"><i style={{ width: `${cityThreat}%` }} /></div><small>{aliveCount} ALIVE · {lostCount} LOST</small></div>
-        <div className="phase-kicker">{game.round ? `DAY ${game.round}` : "WAITING ROOM"}</div>
+        <div className="phase-kicker">{game.case_profile.code} · {game.case_profile.location} · {game.round ? `DAY ${game.round}` : "WAITING ROOM"}</div>
         <h1>{phase[0]}</h1>
         <p>{phase[1]}</p>
         <div className="phase-now" aria-live="polite"><i /><b>{PHASE_ALERT_META[game.phase].title}</b><span>{remaining > 0 ? `${remaining}초 남음` : game.phase === "lobby" ? "시작 대기 중" : "진행 중"}</span></div>
@@ -930,7 +959,7 @@ export default function GamePage() {
               </div>
             </div>
             <div className="chat-title"><div><MessageCircle size={16} /><b>{game.phase === "night" && role === "mafia" ? "마피아 비밀 채팅" : game.phase === "day" ? "자유 토론 채널" : "테이블 대화"}</b></div><span>{canChat ? (game.phase === "day" && isCurrentSpeaker ? "집중 발언 중" : "대화 가능") : "침묵 중"}</span></div>
-            <div className="chat-scroll">{game.chat.length === 0 && <div className="empty-chat">아직 대화가 없습니다.</div>}{game.chat.map((msg) => <div className="chat-message" key={msg.id}><b>{msg.from}</b><p>{msg.text}</p></div>)}<div ref={chatEndRef} /></div>
+            <div className="chat-scroll">{game.chat.filter((msg) => !msg.from_id || !blockedPlayers.includes(msg.from_id)).length === 0 && <div className="empty-chat">표시할 대화가 없습니다.</div>}{game.chat.filter((msg) => !msg.from_id || !blockedPlayers.includes(msg.from_id)).map((msg) => <div className="chat-message" key={msg.id}><header><b>{msg.from}</b>{msg.from_id && msg.from_id !== game.me.id && <span><button onClick={() => setReportTarget({ id: msg.from_id!, name: msg.from })} aria-label={`${msg.from} 신고`}><Flag size={10} />신고</button><button onClick={() => blockPlayer(msg.from_id!, msg.from)} aria-label={`${msg.from} 차단`}><Ban size={10} />차단</button></span>}</header><p>{msg.text}</p></div>)}<div ref={chatEndRef} /></div>
             {canReact && <div className="reaction-dock" aria-label="빠른 리액션">{REACTION_EMOJIS.map((emoji) => <button key={emoji} onClick={() => send({ t: "react", emoji })} aria-label={`${emoji} 리액션 보내기`}>{emoji}</button>)}</div>}
             <form className="chat-form" onSubmit={submitChat}><input value={chatText} onChange={(e) => setChatText(e.target.value)} disabled={!canChat} placeholder={canChat ? (game.phase === "day" ? "발언 내용은 공개 기록으로 남습니다" : "메시지를 입력하세요") : game.phase === "day" ? "질문은 공개 심문 카드에서 보내세요" : "지금은 말할 수 없습니다"} maxLength={160} /><button disabled={!canChat || !chatText.trim()} aria-label="메시지 전송"><Send size={16} /></button></form>
           </div>
@@ -946,6 +975,9 @@ export default function GamePage() {
       {inviteOpen && <InviteModal room={room} online={game.players.filter((player) => player.connected).length} copied={copied} onClose={() => setInviteOpen(false)} onCopy={copyInvite} onShare={shareInvite} onPoster={() => createPoster("invite")} />}
       {caseOpen && <CaseFileModal game={game} room={room} onClose={() => setCaseOpen(false)} onCopy={copyCaseFile} />}
       {rankingOpen && <RankingModal entries={leaderboard} signedIn={Boolean(identity)} onClose={() => setRankingOpen(false)} />}
+      {settingsOpen && <SettingsModal voiceOn={voiceOn} soundOn={soundOn} onVoice={toggleVoice} onSound={toggleSound} onLegal={setLegalPage} onClose={() => setSettingsOpen(false)} />}
+      {legalPage && <LegalModal page={legalPage} onClose={() => setLegalPage(null)} />}
+      {reportTarget && <ReportModal target={reportTarget.name} reason={reportReason} setReason={setReportReason} onSubmit={submitReport} onBlock={() => { blockPlayer(reportTarget.id, reportTarget.name); setReportTarget(null); }} onClose={() => setReportTarget(null)} />}
       <footer><span>BLACK MIDNIGHT / IMMERSIVE CASE SYSTEM</span><span>실시간 관제 · 역할 작전 지시 · 효과음 · 개인 추리 보드</span></footer>
     </main>
   );
@@ -1006,6 +1038,37 @@ function CaseFileModal({ game, room, onClose, onCopy }: { game: GameState; room:
       </section>
     </div>
   );
+}
+
+const LEGAL_COPY: Record<LegalPage, { kicker: string; title: string; intro: string; sections: { title: string; body: string }[] }> = {
+  terms: { kicker: "TERMS OF SERVICE", title: "이용약관", intro: "검은 자정은 만 14세 이상을 위한 실시간 소셜 추리 게임입니다.", sections: [
+    { title: "게임 이용", body: "닉네임과 채팅에 타인의 권리를 침해하는 내용을 사용할 수 없습니다. 게임 진행을 방해하거나 시스템을 악용하면 이용이 제한될 수 있습니다." },
+    { title: "사용자 콘텐츠", body: "플레이어는 자신이 전송한 채팅과 음성에 책임을 집니다. 신고된 콘텐츠는 안전한 운영과 분쟁 대응을 위해 검토될 수 있습니다." },
+    { title: "서비스 변경", body: "공정성과 안정성을 위해 규칙, 콘텐츠, 운영 정책이 업데이트될 수 있으며 중요한 변경은 앱 또는 저장소에서 알립니다." },
+  ] },
+  privacy: { kicker: "PRIVACY", title: "개인정보 처리 안내", intro: "게임 진행에 필요한 최소한의 정보만 처리합니다.", sections: [
+    { title: "처리 정보", body: "닉네임, 익명 플레이어 식별키, 게임 점수, 신고 내용이 처리됩니다. 음성은 WebRTC로 참가자 사이에 실시간 전송되며 서버에 녹음하거나 저장하지 않습니다." },
+    { title: "보관과 삭제", body: "익명 방 상태와 대화는 휘발성 메모리에만 유지되고 방 종료 후 삭제됩니다. 차단 목록과 설정은 사용자의 기기에 저장됩니다." },
+    { title: "권한", body: "마이크 권한은 음성 채팅에 참여할 때만 요청합니다. 권한을 거부해도 텍스트 게임은 계속 이용할 수 있습니다." },
+  ] },
+  community: { kicker: "COMMUNITY SAFETY", title: "커뮤니티 가이드", intro: "거짓말은 역할 안에서만, 존중은 항상 지켜주세요.", sections: [
+    { title: "금지 행위", body: "혐오·차별·성적 괴롭힘, 위협, 개인정보 공개, 스팸, 고의적인 게임 방해는 허용되지 않습니다." },
+    { title: "신고와 차단", body: "대화 작성자 옆 신고 버튼으로 운영 검토를 요청하고 차단 버튼으로 해당 사용자의 채팅과 음성을 즉시 숨길 수 있습니다." },
+    { title: "안전한 플레이", body: "불쾌하거나 위험한 상황에서는 방을 나가고, 현실의 긴급 상황은 지역 응급기관 또는 경찰에 연락하세요." },
+  ] },
+};
+
+function LegalModal({ page, onClose }: { page: LegalPage; onClose: () => void }) {
+  const content = LEGAL_COPY[page];
+  return <div className="safety-backdrop" role="dialog" aria-modal="true" aria-label={content.title}><section className="safety-modal"><button className="safety-close" onClick={onClose}><X size={18} /></button><header><FileText size={25} /><small>{content.kicker}</small><h2>{content.title}</h2><p>{content.intro}</p></header><div className="legal-sections">{content.sections.map((section) => <article key={section.title}><b>{section.title}</b><p>{section.body}</p></article>)}</div><button className="primary-button" onClick={onClose}>확인</button></section></div>;
+}
+
+function SettingsModal({ voiceOn, soundOn, onVoice, onSound, onLegal, onClose }: { voiceOn: boolean; soundOn: boolean; onVoice: () => void; onSound: () => void; onLegal: (page: LegalPage) => void; onClose: () => void }) {
+  return <div className="safety-backdrop" role="dialog" aria-modal="true" aria-label="게임 설정"><section className="safety-modal"><button className="safety-close" onClick={onClose}><X size={18} /></button><header><Settings size={25} /><small>OPERATIONS</small><h2>게임 설정</h2><p>몰입도와 접근성, 운영 정책을 한곳에서 관리합니다.</p></header><div className="settings-list"><button onClick={onVoice}><span><Volume2 size={17} /><b>진행 아나운서</b></span><em>{voiceOn ? "켜짐" : "꺼짐"}</em></button><button onClick={onSound}><span><Radio size={17} /><b>게임 효과음</b></span><em>{soundOn ? "켜짐" : "꺼짐"}</em></button><button onClick={() => onLegal("community")}><span><ShieldCheck size={17} /><b>커뮤니티 가이드</b></span><ChevronRight size={15} /></button><button onClick={() => onLegal("privacy")}><span><LockKeyhole size={17} /><b>개인정보 처리 안내</b></span><ChevronRight size={15} /></button><button onClick={() => onLegal("terms")}><span><FileText size={17} /><b>이용약관</b></span><ChevronRight size={15} /></button></div></section></div>;
+}
+
+function ReportModal({ target, reason, setReason, onSubmit, onBlock, onClose }: { target: string; reason: string; setReason: (reason: string) => void; onSubmit: (event: FormEvent) => void; onBlock: () => void; onClose: () => void }) {
+  return <div className="safety-backdrop" role="dialog" aria-modal="true" aria-label={`${target} 신고`}><form className="safety-modal report-modal" onSubmit={onSubmit}><button type="button" className="safety-close" onClick={onClose}><X size={18} /></button><header><Flag size={25} /><small>PLAYER SAFETY</small><h2>{target}님 신고</h2><p>신고는 운영 검토 대상으로 접수됩니다. 즉시 보이지 않게 하려면 차단도 함께 사용하세요.</p></header><label>신고 사유<select value={reason} onChange={(event) => setReason(event.target.value)}><option>괴롭힘 또는 혐오 발언</option><option>성적이거나 부적절한 콘텐츠</option><option>개인정보 노출 또는 위협</option><option>스팸 또는 고의적인 게임 방해</option><option>기타 운영 정책 위반</option></select></label><div className="report-actions"><button type="button" className="secondary-button" onClick={onBlock}><Ban size={15} />즉시 차단</button><button className="danger-button"><Flag size={15} />신고 접수</button></div></form></div>;
 }
 
 function RankingModal({ entries, signedIn, onClose }: { entries: LeaderboardEntry[]; signedIn: boolean; onClose: () => void }) {

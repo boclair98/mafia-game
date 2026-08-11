@@ -203,6 +203,30 @@ footer { max-width: 1550px; margin: 14px auto; display: flex; justify-content: s
   .landing-copy h1 { font-size: 62px; }.rule-strip span { font-size: 10px; }.join-card { width: 90%; padding: 26px; }.room-pill span { display: none; }.room-pill b { border-left: 0; }.phase-banner h1 { font-size: 28px; }.primary-button, .secondary-button, .danger-button { padding: 0 13px; }.start-game-button { min-width: 116px; gap: 6px; }
 }
 
+/* Store-ready safety, consent and settings surfaces */
+.chat-message header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.chat-message header span { display:flex; gap:4px; opacity:0; transition:opacity .2s; }
+.chat-message:hover header span,.chat-message:focus-within header span { opacity:1; }
+.chat-message header button { display:flex; align-items:center; gap:3px; border:0; background:transparent; color:#676e78; font-size:7px; cursor:pointer; }
+.chat-message header button:hover { color:#d98a91; }
+.terms-check { margin-top:12px; padding:11px!important; display:flex!important; flex-direction:row!important; align-items:flex-start; gap:9px; border:1px solid #2a2f37; background:#0a0d11; }
+.terms-check > input { width:16px!important; height:16px; margin-top:1px; accent-color:#b69455; }
+.terms-check > span { display:grid; gap:4px; }.terms-check b { color:#c9c5bc; font-size:9px; }.terms-check small { color:#686f78; font-size:7px; }
+.terms-check small button { padding:0; border:0; background:none; color:#a58b5b; font:inherit; text-decoration:underline; cursor:pointer; }
+.landing-settings { margin-left:auto; width:34px; height:34px; display:grid; place-items:center; border:1px solid #343942; background:rgba(10,13,17,.6); color:#a9a49a; cursor:pointer; }
+.safety-backdrop { position:fixed; z-index:220; inset:0; padding:24px; display:grid; place-items:center; background:rgba(2,4,7,.88); backdrop-filter:blur(12px); }
+.safety-modal { width:min(520px,94vw); max-height:min(760px,92dvh); overflow-y:auto; position:relative; padding:30px; border:1px solid #393f48; background:linear-gradient(150deg,#14181f,#090c10 70%); box-shadow:0 30px 90px rgba(0,0,0,.75); }
+.safety-close { position:absolute; top:14px; right:14px; width:34px; height:34px; display:grid; place-items:center; border:1px solid #343a43; background:#11151b; color:#858c95; cursor:pointer; }
+.safety-modal > header { padding-right:34px; }.safety-modal > header > svg { color:var(--gold); }.safety-modal > header small { display:block; margin-top:12px; color:var(--red); font:7px monospace; letter-spacing:.16em; }
+.safety-modal > header h2 { margin:6px 0 8px; color:#eee8dc; font:28px Georgia,serif; }.safety-modal > header p { color:#858b94; font-size:10px; line-height:1.65; }
+.legal-sections { margin:22px 0; display:grid; gap:10px; }.legal-sections article { padding:14px; border-left:2px solid #8e7445; background:rgba(255,255,255,.025); }
+.legal-sections b { color:#d0cbc1; font-size:10px; }.legal-sections p { margin:6px 0 0; color:#747b85; font-size:9px; line-height:1.65; }
+.settings-list { margin-top:22px; display:grid; gap:7px; }.settings-list > button { min-height:48px; padding:0 13px; display:flex; align-items:center; justify-content:space-between; border:1px solid #2d333c; background:#10141a; color:#949aa2; cursor:pointer; }
+.settings-list > button span { display:flex; align-items:center; gap:9px; }.settings-list b { color:#cbc7be; font-size:10px; }.settings-list em { color:var(--gold); font-size:8px; font-style:normal; }
+.report-modal label { margin:22px 0; display:grid; gap:8px; color:#9da2a9; font-size:9px; }.report-modal select { height:46px; padding:0 12px; border:1px solid #343a43; background:#0b0e13; color:#d2cdc3; }
+.report-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }.report-actions button { min-height:45px; display:flex; justify-content:center; align-items:center; gap:7px; }
+@media (max-width:760px) { .safety-backdrop { padding:0; }.safety-modal { width:100vw; max-width:none; max-height:100dvh; min-height:100dvh; padding:calc(34px + env(safe-area-inset-top)) 22px calc(30px + env(safe-area-inset-bottom)); border:0; }.chat-message header span { opacity:1; }.landing-settings { margin-left:auto; }.landing-nav > span { display:none; } }
+
 /* Murder-mystery visual system */
 .landing-shell { background-image: url('/case-room-wide.webp'); background-position: center; }
 .landing-shell::before { background: linear-gradient(90deg,rgba(3,5,8,.94) 0%,rgba(3,5,8,.68) 42%,rgba(3,5,8,.18) 69%,rgba(3,5,8,.82) 100%),linear-gradient(0deg,rgba(3,5,8,.96),transparent 56%,rgba(3,5,8,.5)); }

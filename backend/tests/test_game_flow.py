@@ -312,6 +312,27 @@ def test_forensic_clue_always_includes_the_real_attacker_without_revealing_one_a
     assert room._state_for(room.players["p2"])["clues"][-1]["id"] == clue["id"]
 
 
+def test_match_exposes_a_curated_case_profile_and_chat_sender_id():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.phase = "day"
+    room.players["p1"].last_chat_at = 0
+    assert room.add_chat("p1", "현장 기록을 확인했습니다") is None
+
+    state = room._state_for(room.players["p2"])
+    assert state["case_profile"]["code"].startswith("BM-")
+    assert state["case_profile"]["briefing"]
+    assert state["chat"][-1]["from_id"] == "p1"
+
+
+def test_player_report_is_validated_and_recorded_without_public_broadcast():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    assert room.report_player("p1", "p1", "스팸") is not None
+    assert room.report_player("p1", "p2", "") is not None
+    assert room.report_player("p1", "p2", "괴롭힘 또는 혐오 발언") is None
+    assert room.reports[-1]["target_id"] == "p2"
+    assert "reports" not in room._state_for(room.players["p1"])
+
+
 def test_rematch_erases_previous_public_and_mafia_chat():
     room = room_with("mafia", "doctor", "detective", "citizen")
     room.phase = "gameover"

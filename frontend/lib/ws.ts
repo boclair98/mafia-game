@@ -30,6 +30,9 @@ export function gameSocketUrl(room: string, nick: string, key: string): string {
   if (process.env.NODE_ENV === "development") {
     return `ws://${location.hostname}:8000/api/ws?${query}`;
   }
+  if (location.hostname === "localhost") {
+    return `wss://black-midnight.coders.kr/api/ws?${query}`;
+  }
   const proto = location.protocol === "https:" ? "wss" : "ws";
   return `${proto}://${location.host}/api/ws?${query}`;
 }

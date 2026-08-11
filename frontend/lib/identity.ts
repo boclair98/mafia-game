@@ -16,6 +16,7 @@
 import { useEffect, useState } from "react";
 
 import { tracked } from "./warming";
+import { apiUrl } from "./api";
 
 export type Me = {
   id: string;
@@ -32,7 +33,7 @@ export function useMe(): MeState {
   useEffect(() => {
     let alive = true;
     tracked(async () => {
-      const r = await fetch("/api/me", { credentials: "include" });
+      const r = await fetch(apiUrl("/api/me"), { credentials: "include" });
       if (!alive) return;
       if (r.ok) setMe(await r.json());
       else setMe(null);

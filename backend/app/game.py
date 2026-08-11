@@ -87,6 +87,13 @@ FORENSIC_CLUES = [
     ("젖은 구두 자국", "빗물 성분이 남은 발자국은 {suspects} 중 한 명이 현장을 지났음을 시사합니다."),
 ]
 
+CASE_PROFILES = [
+    {"id": "hotel-404", "code": "BM-404", "title": "404호의 마지막 연주", "location": "백야 호텔 4층", "victim": "바이올리니스트 한서윤", "briefing": "잠긴 객실 안에서 연주자가 숨진 채 발견됐습니다. 출입 기록은 방 안의 누군가가 조작했습니다."},
+    {"id": "night-train", "code": "BM-717", "title": "7호 야간열차 밀실", "location": "자정행 7호 열차", "victim": "탐사 기자 윤재하", "briefing": "터널을 통과한 4분 동안 기자가 살해됐습니다. 용의자는 모두 같은 객차에 있었습니다."},
+    {"id": "black-wing", "code": "BM-113", "title": "검은 날개 전시관", "location": "아르카 미술관", "victim": "수석 큐레이터 차유진", "briefing": "정전 직후 경보가 울렸고 큐레이터가 사라졌습니다. 위조된 작품표가 범인의 동선을 가리킵니다."},
+    {"id": "observatory", "code": "BM-042", "title": "관측소의 00시 42분", "location": "북악 천문 관측소", "victim": "천문학자 강이안", "briefing": "관측 기록이 끊긴 90초 사이 사건이 벌어졌습니다. 남겨진 신호는 내부자의 암호입니다."},
+]
+
 
 def clean_room_name(raw: str | None) -> str:
     if not raw:
@@ -155,6 +162,8 @@ class Room:
         self._speaker_index = -1
         self.last_death_id: str | None = None
         self.pace = "quick"
+        self.case_profile = random.choice(CASE_PROFILES)
+        self.reports: deque[dict[str, Any]] = deque(maxlen=100)
         self._bot_marks: set[str] = set()
         self._bot_suspicions: dict[str, str] = {}
         self._task: asyncio.Task | None = None
@@ -408,6 +417,7 @@ class Room:
             player.last_chat_at = 0.0
             player.last_reaction_at = 0.0
         self.round = 1
+        self.case_profile = random.choice(CASE_PROFILES)
         self.winner = None
         self.actions.clear()
         self.votes.clear()
@@ -428,7 +438,8 @@ class Room:
         self.speaker_deadline = 0.0
         self._speaker_index = -1
         self.last_death_id = None
-        self._record("도시에 검은 자정이 내렸습니다. 역할을 확인하세요.")
+        self._record(f"사건 {self.case_profile['code']} · {self.case_profile['title']}. 현장이 봉쇄되었습니다.")
+        self._record(self.case_profile["briefing"])
         self._bot_marks.clear()
         self._bot_suspicions.clear()
         self._set_phase("reveal", self._seconds("reveal"))
@@ -617,9 +628,25 @@ class Room:
             return "지금은 대화할 수 없습니다."
         player.last_chat_at = now
         self.chat.append(
-            {"id": secrets.token_hex(4), "from": player.nick, "text": text,
+            {"id": secrets.token_hex(4), "from": player.nick, "from_id": player.id, "text": text,
              "visibility": visibility, "at": int(now * 1000)}
         )
+        return None
+
+    def report_player(self, pid: str, target_id: str, raw_reason: str) -> str | None:
+        reporter = self.players.get(pid)
+        target = self.players.get(target_id)
+        reason = " ".join(raw_reason.strip().split())[:160]
+        if not reporter or not target or reporter.id == target.id:
+            return "신고할 수 없는 대상입니다."
+        if not reason:
+            return "신고 사유를 선택하거나 입력해 주세요."
+        self.reports.append({
+            "id": secrets.token_hex(8), "room": self.name,
+            "reporter_id": reporter.id, "target_id": target.id,
+            "target_name": target.nick, "reason": reason,
+            "created_at": int(time.time() * 1000),
+        })
         return None
 
     async def _ticker(self) -> None:
@@ -781,7 +808,7 @@ class Room:
                         random.choice(BOT_QUESTIONS).format(target=target.nick)
                         if target else random.choice(BOT_LINES)
                     )
-                    self.chat.append({"id": secrets.token_hex(4), "from": bot.nick, "text": line,
+                    self.chat.append({"id": secrets.token_hex(4), "from": bot.nick, "from_id": bot.id, "text": line,
                                       "visibility": "all", "at": int(time.time() * 1000)})
                     if not any(item["round"] == self.round and item["speaker_id"] == bot.id for item in self.claims):
                         claim = f"제 판단은 {target.nick}님을 우선 확인해야 한다는 것입니다." if target else line
@@ -811,7 +838,7 @@ class Room:
                 if mark not in self._bot_marks and self.deadline - time.time() < self._seconds("defense") - 3:
                     self._bot_marks.add(mark)
                     self.chat.append(
-                        {"id": secrets.token_hex(4), "from": accused.nick,
+                        {"id": secrets.token_hex(4), "from": accused.nick, "from_id": accused.id,
                          "text": random.choice(BOT_DEFENSE_LINES), "visibility": "all",
                          "at": int(time.time() * 1000)}
                     )
@@ -1075,6 +1102,7 @@ class Room:
         return {
             "t": "state",
             "room": self.name,
+            "case_profile": self.case_profile,
             "phase": self.phase,
             "round": self.round,
             "deadline": round(self.deadline * 1000),
