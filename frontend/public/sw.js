@@ -1,4 +1,4 @@
-const CACHE = "black-midnight-v5";
+const CACHE = "black-midnight-v6";
 const SHELL = [
   "/",
   "/manifest.webmanifest",
@@ -27,6 +27,21 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || event.request.url.includes("/api/")) return;
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
+
+  // HTML and versioned Next.js chunks must always come from the same live
+  // deployment. Runtime-caching those files can mix an old document with new
+  // chunks after a release and surface a ChunkLoadError on installed PWAs.
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request, { cache: "no-store" })
+        .catch(() => caches.match("/"))
+    );
+    return;
+  }
+
+  if (!SHELL.includes(url.pathname)) return;
   event.respondWith(
     fetch(event.request)
       .then((response) => {
@@ -34,6 +49,6 @@ self.addEventListener("fetch", (event) => {
         caches.open(CACHE).then((cache) => cache.put(event.request, copy));
         return response;
       })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/")))
+      .catch(() => caches.match(event.request))
   );
 });

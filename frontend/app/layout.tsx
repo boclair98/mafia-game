@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
+import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 import { WarmingBar } from "@/components/WarmingBanner";
 import "./globals.css";
 
@@ -42,7 +43,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="ko">
       <body>
         <WarmingBar />
-        {children}
+        <AppErrorBoundary>{children}</AppErrorBoundary>
       </body>
     </html>
   );

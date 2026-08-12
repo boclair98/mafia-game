@@ -94,9 +94,25 @@ server {
     add_header Cache-Control "public, immutable";
   }
 
+  # A service worker and the HTML shell are release pointers, not immutable
+  # assets. They must be revalidated so a mobile/PWA client never combines an
+  # old app shell with chunks from the newly released container.
+  location = /sw.js {
+    expires -1;
+    add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+    try_files /sw.js =404;
+  }
+
+  location = /index.html {
+    expires -1;
+    add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+    try_files /index.html =404;
+  }
+
   # SPA fallback: any unknown path serves the closest matching exported
   # HTML, defaulting to /index.html so client-side routing can pick up.
   location / {
+    add_header Cache-Control "no-cache" always;
     try_files $uri $uri.html $uri/index.html /index.html;
   }
 }
