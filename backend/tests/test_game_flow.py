@@ -479,6 +479,65 @@ def test_public_presence_counts_humans_without_exposing_bot_seats():
     assert manager.active_matches == 1
 
 
+def test_match_draws_a_round_event_and_exposes_it_to_every_player():
+    room = room_with("citizen")
+    room.fill_bots("p1", 4)
+
+    assert room.start("p1") is None
+    assert room.round_event is not None
+    assert room.round_event["id"]
+    state = room._state_for(room.players["p1"])
+    assert state["round_event"]["title"] == room.round_event["title"]
+    assert "자정 사건 카드" in " ".join(room.case_log)
+
+
+def test_blackout_seals_pressure_until_vote_and_limits_one_mark_per_day():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.round = 1
+    room.phase = "day"
+    room.round_event = {
+        "id": "blackout", "title": "기록실 정전", "tag": "SEALED PRESSURE",
+        "copy": "봉인됩니다.", "sealed_pressure": True,
+    }
+
+    assert room.apply_pressure("p2", "p1") is None
+    assert "이미 사용" in room.apply_pressure("p2", "p3")
+    day_state = room._state_for(room.players["p3"])
+    assert day_state["pressure_counts"] == {}
+    assert day_state["pressure_progress"] == {
+        "completed": 1, "total": 4, "sealed": True,
+    }
+
+    room._advance()
+    vote_state = room._state_for(room.players["p3"])
+    assert room.phase == "vote"
+    assert vote_state["pressure_counts"] == {"p1": 1}
+    assert "P2님이 P1님을 지목" in " ".join(room.case_log)
+
+
+def test_endgame_awards_and_pressure_bonus_reflect_real_actions():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.round = 1
+    room.phase = "day"
+    room.pressure_marks = {"1:p2": "p1"}
+    room.questions.append({
+        "id": "q1", "from": "P2", "from_id": "p2", "speaker_id": "p3",
+        "text": "행동 대상은?", "round": 1, "at": 1,
+    })
+    room.claims.append({
+        "id": "c1", "speaker_id": "p3", "speaker": "P3",
+        "text": "P1을 조사했습니다.", "round": 1, "at": 1,
+    })
+
+    room._finish("citizen")
+
+    assert room.players["p2"].score == 129
+    assert {award["title"] for award in room.awards} >= {
+        "질문 폭격기", "기록 설계자", "붉은 실의 주인",
+    }
+    assert room._state_for(room.players["p2"])["awards"] == room.awards
+
+
 def test_only_host_can_remove_another_lobby_seat():
     room = room_with("citizen", "citizen", "citizen", "citizen")
     assert room.remove_lobby_seat("p2", "p3") is not None

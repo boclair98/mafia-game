@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  Activity, Ban, Bot, BookOpen, Check, ChevronLeft, ChevronRight, Clipboard, Crosshair, Download, Eye, FileText, Film, Flag, Gavel,
+  Activity, Award, Ban, Bot, BookOpen, Check, ChevronLeft, ChevronRight, Clipboard, Crosshair, Download, Eye, FileText, Film, Flag, Gavel,
   Headphones, HeartPulse, LockKeyhole, LogIn, MessageCircle, Mic, MicOff, Moon, PhoneOff, Radio, RotateCcw, Search, Send, Siren,
   Settings, Share2, ShieldCheck, ShieldQuestion, Skull, Smartphone, Sparkles,
   TimerReset, Trophy, UserPlus, Users, Volume2, Vote, X,
@@ -173,7 +173,9 @@ export default function GamePage() {
   const [phaseAlert, setPhaseAlert] = useState<GameState["phase"] | null>(null);
   const [decisionFlash, setDecisionFlash] = useState<{ label: string; target: string } | null>(null);
   const [ballotReveal, setBallotReveal] = useState<{ entries: GameState["ballot_feed"]; visible: number } | null>(null);
+  const [eventReveal, setEventReveal] = useState<GameState["round_event"]>(null);
   const previousPhase = useRef<string | null>(null);
+  const previousEvent = useRef<string | null>(null);
   const phaseAlertTimer = useRef<number | null>(null);
   const ballotRevealTimer = useRef<number | null>(null);
   const decisionFlashTimer = useRef<number | null>(null);
@@ -183,6 +185,11 @@ export default function GamePage() {
   const soundPhase = game?.phase;
   const countdownRemaining = game ? secondsLeft(game.deadline, now) : 0;
   const narrationText = game && soundPhase ? phaseNarration(game, soundPhase) : "";
+  const roundEventId = game?.round_event?.id ?? null;
+  const roundEventTitle = game?.round_event?.title ?? "";
+  const roundEventTag = game?.round_event?.tag ?? "";
+  const roundEventCopy = game?.round_event?.copy ?? "";
+  const roundEventSealed = game?.round_event?.sealed_pressure ?? false;
   const voiceCanSpeak = Boolean(game?.me.alive && (
     ["lobby", "day", "vote", "gameover"].includes(game.phase)
     || (game.phase === "defense" && game.me.id === game.accused_id)
@@ -309,6 +316,29 @@ export default function GamePage() {
     previousPhase.current = game.phase;
   }, [game]);
 
+  useEffect(() => {
+    if (game?.phase === "lobby") {
+      previousEvent.current = null;
+      queueMicrotask(() => setEventReveal(null));
+      return;
+    }
+    if (!roundEventId || previousEvent.current === roundEventId) return;
+    const event: NonNullable<GameState["round_event"]> = {
+      id: roundEventId,
+      title: roundEventTitle,
+      tag: roundEventTag,
+      copy: roundEventCopy,
+      sealed_pressure: roundEventSealed,
+    };
+    previousEvent.current = roundEventId;
+    const showTimer = window.setTimeout(() => setEventReveal(event), 3600);
+    const hideTimer = window.setTimeout(() => setEventReveal(null), 7100);
+    return () => {
+      window.clearTimeout(showTimer);
+      window.clearTimeout(hideTimer);
+    };
+  }, [game?.phase, roundEventCopy, roundEventId, roundEventSealed, roundEventTag, roundEventTitle]);
+
   useEffect(() => () => {
     if (phaseAlertTimer.current) window.clearTimeout(phaseAlertTimer.current);
     if (ballotRevealTimer.current) window.clearTimeout(ballotRevealTimer.current);
@@ -412,6 +442,10 @@ export default function GamePage() {
           setGame({
             ...next,
             players: next.players.map((player) => ({ ...player, score: player.score ?? 0, voice: player.voice ?? false })),
+            round_event: next.round_event ?? null,
+            pressure_counts: next.pressure_counts ?? {},
+            pressure_progress: next.pressure_progress ?? { completed: 0, total: 0, sealed: false },
+            awards: next.awards ?? [],
             accused_id: next.accused_id ?? null,
             judgement_counts: next.judgement_counts ?? { execute: 0, spare: 0 },
             ballot_feed: next.ballot_feed ?? [],
@@ -434,6 +468,7 @@ export default function GamePage() {
               private_lead: next.me.private_lead ?? null,
               ghost_prediction: next.me.ghost_prediction ?? null,
               ghost_correct: next.me.ghost_correct ?? null,
+              pressure_target: next.me.pressure_target ?? null,
             },
           });
           setSelected((current) => {
@@ -843,7 +878,7 @@ export default function GamePage() {
             <label><span>당신의 이름 <em>{nick.length}/16</em></span><input id="landing-nick" value={nick} onChange={(e) => setNick(e.target.value)} placeholder="게임에서 불릴 이름" maxLength={16} /></label>
             <label><span>비밀 방 코드 <em>{invitedByLink ? "초대 링크에서 확인됨" : "친구와 공유할 코드"}</em></span><div className="room-field"><input value={roomInput} onChange={(e) => { setRoomInput(e.target.value); setInvitedByLink(false); }} maxLength={32} /><button type="button" onClick={() => { setRoomInput(makeRoom()); setInvitedByLink(false); }} aria-label="새 방 코드 만들기"><RotateCcw size={15} /></button></div></label>
             <label className="terms-check"><input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span><b>커뮤니티 규칙과 이용약관에 동의합니다</b><small><button type="button" onClick={() => setLegalPage("terms")}>이용약관</button> · <button type="button" onClick={() => setLegalPage("community")}>커뮤니티 가이드</button> · <button type="button" onClick={() => setLegalPage("privacy")}>개인정보</button></small></span></label>
-            <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim() || !termsAccepted}><LogIn size={18} /><span>{!termsAccepted ? "규칙에 동의하고 입장" : nick.trim() ? `${nick.trim()}으로 수사 합류` : "이름을 입력하고 수사 합류"}</span><ChevronRight size={16} /></button>
+            <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim() || !termsAccepted}><LogIn size={18} /><span>{!termsAccepted ? "규칙에 동의하고 입장" : nick.trim() ? `${nick.trim()}님으로 수사 합류` : "이름을 입력하고 수사 합류"}</span><ChevronRight size={16} /></button>
           </form>
           {installPrompt && <button className="install-button" type="button" onClick={installApp}><Smartphone size={16} /> 홈 화면에 앱 설치</button>}
           <div className="join-proof"><span><Check size={12} />설치 없음</span><span><Check size={12} />AI 인원 채우기</span><span><Check size={12} />실시간 음성</span></div>
@@ -878,6 +913,18 @@ export default function GamePage() {
             {voiceOn && <div className="phase-alert-voice"><Volume2 size={13} /><span>{phaseNarration(game, phaseAlert)}</span></div>}
             {remaining > 0 && <div className="phase-alert-countdown"><b>{remaining}</b><span>초 남음</span></div>}
             <div className="phase-alert-line"><i /></div>
+          </div>
+        </div>
+      )}
+      {eventReveal && (
+        <div className={`event-reveal event-${eventReveal.id}`} role="status" aria-live="assertive">
+          <div>
+            <span>{eventReveal.tag} · DAY {game.round}</span>
+            <Sparkles size={25} />
+            <h2>{eventReveal.title}</h2>
+            <p>{eventReveal.copy}</p>
+            <small>이번 라운드 특별 규칙</small>
+            <button onClick={() => setEventReveal(null)}>확인</button>
           </div>
         </div>
       )}
@@ -925,6 +972,13 @@ export default function GamePage() {
 
         <section className="table-panel">
           <div className="panel-heading"><div><span>{game.phase === "lobby" ? "SUSPECT FILES" : "THE TABLE"}</span><h2>{game.phase === "lobby" ? "용의자 명단" : "참가자"}</h2></div><div>{game.players.filter((p) => p.alive).length} 생존</div></div>
+          {game.round_event && game.phase !== "lobby" && (
+            <section className={`round-event-card event-${game.round_event.id}`}>
+              <div><Sparkles size={17} /><span><small>{game.round_event.tag} · DAY {game.round}</small><b>{game.round_event.title}</b></span></div>
+              <p>{game.round_event.copy}</p>
+              <footer><span>{game.pressure_progress.sealed && game.phase === "day" ? "긴급 지목 봉인 중" : "긴급 지목 현황"}</span><b>{game.pressure_progress.completed}/{game.pressure_progress.total}</b></footer>
+            </section>
+          )}
           {game.me.private_lead && game.phase !== "lobby" && <PrivateLeadCard lead={game.me.private_lead} canReveal={game.phase === "day" && game.me.alive} onReveal={() => send({ t: "reveal_lead", lead_id: game.me.private_lead?.id })} />}
           {!game.me.alive && !["spectator", "mafia"].includes(role) && <AfterlifePanel game={game} onPredict={(target) => send({ t: "ghost_predict", target })} />}
           {accusedPlayer && ["defense", "verdict"].includes(game.phase) && (
@@ -970,14 +1024,18 @@ export default function GamePage() {
           {game.phase === "gameover" && game.moments.length > 0 && (
             <section className="replay-panel"><header><Film size={17} /><span><b>결정적 장면 리플레이</b><small>주장과 판결이 어떻게 승부를 바꿨는지 시간순으로 복기합니다.</small></span></header><div>{game.moments.slice(-8).map((moment, index) => <article key={moment.id}><span>{String(index + 1).padStart(2, "0")}</span><div><small>{moment.kind.toUpperCase()} · DAY {moment.round}</small><p>{moment.text}</p></div></article>)}</div></section>
           )}
+          {game.phase === "gameover" && game.awards.length > 0 && (
+            <section className="case-awards"><header><Award size={18} /><span><b>자정의 사건 훈장</b><small>이번 판에서 만들어진 플레이 스타일 기록</small></span></header><div>{game.awards.map((award) => <article key={award.id}><Award size={20} /><span><small>{award.title}</small><b>{award.player}</b><p>{award.copy}</p></span></article>)}</div></section>
+          )}
           <div className="reaction-layer" aria-live="polite">{game.reactions.map((reaction, index) => <div key={reaction.id} style={{ left: `${12 + (index * 17) % 74}%`, animationDelay: `${(index % 3) * .08}s` }}><b>{reaction.emoji}</b><span>{reaction.from}</span></div>)}</div>
           <div className="player-grid">
             {game.players.map((player, index) => {
               const clueHeat = game.clues.filter((clue) => clue.suspect_ids.includes(player.id)).length * 24;
               const leadHeat = game.public_leads.filter((lead) => lead.suspect_id === player.id).length * 18;
               const readHeat = (game.read_summary[player.id]?.suspect ?? 0) * 12;
-              const suspicion = Math.min(100, clueHeat + leadHeat + readHeat + player.votes * 14);
-              return <PlayerCard key={player.id} player={player} index={index} self={player.id === game.me.id} host={player.id === game.host} accused={player.id === game.accused_id} selected={selected === player.id} selectable={targetPlayers.some((p) => p.id === player.id)} speaking={player.id === game.speaker_id} suspicion={suspicion} mark={evidence[player.id] ?? 0} phase={game.phase} onSelect={() => setSelected(player.id)} />;
+              const pressureCount = game.pressure_counts[player.id] ?? 0;
+              const suspicion = Math.min(100, clueHeat + leadHeat + readHeat + pressureCount * 16 + player.votes * 14);
+              return <PlayerCard key={player.id} player={player} index={index} self={player.id === game.me.id} host={player.id === game.host} accused={player.id === game.accused_id} selected={selected === player.id} selectable={targetPlayers.some((p) => p.id === player.id)} speaking={player.id === game.speaker_id} suspicion={suspicion} pressureCount={pressureCount} pressureMarkedByMe={game.me.pressure_target === player.id} canPressure={game.phase === "day" && game.me.alive && player.alive && player.id !== game.me.id && !game.me.pressure_target} mark={evidence[player.id] ?? 0} phase={game.phase} onSelect={() => setSelected(player.id)} onPressure={() => send({ t: "pressure", target: player.id })} />;
             })}
             {game.phase === "lobby" && Array.from({ length: Math.max(0, game.min_players - game.players.length) }).map((_, i) => <div className="empty-seat" key={i}><span>+</span><p>빈자리</p></div>)}
           </div>
@@ -1173,16 +1231,18 @@ function AfterlifePanel({ game, onPredict }: { game: GameState; onPredict: (targ
   return <section className="afterlife-panel"><header><Eye size={17} /><span><small>AFTERLIFE INVESTIGATION</small><b>사후 수사실</b></span></header><p>당신의 목소리는 생존자에게 닿지 않습니다. 사건 기록을 보고 최종 마피아 한 명을 봉인하세요.</p><div>{game.players.filter((player) => player.alive && player.id !== game.me.id).map((player) => <button key={player.id} className={game.me.ghost_prediction === player.id ? "active" : ""} onClick={() => onPredict(player.id)} disabled={game.phase === "gameover"}><span className={`avatar-photo avatar-${Math.max(0, game.players.indexOf(player)) % 12}`} /><b>{player.n}</b>{game.me.ghost_prediction === player.id && <Check size={13} />}</button>)}</div>{prediction && <footer className={game.phase === "gameover" ? game.me.ghost_correct ? "correct" : "wrong" : ""}><LockKeyhole size={13} /><span>{game.phase === "gameover" ? game.me.ghost_correct ? `${prediction.n} — 범인 예측 적중` : `${prediction.n} — 예측 실패` : `${prediction.n}님을 최종 범인으로 봉인했습니다`}</span></footer>}</section>;
 }
 
-function PlayerCard({ player, index, self, host, accused, selected, selectable, speaking, suspicion, mark, phase, onSelect }: { player: PlayerState; index: number; self: boolean; host: boolean; accused: boolean; selected: boolean; selectable: boolean; speaking: boolean; suspicion: number; mark: -1 | 0 | 1; phase: GameState["phase"]; onSelect: () => void }) {
+function PlayerCard({ player, index, self, host, accused, selected, selectable, speaking, suspicion, pressureCount, pressureMarkedByMe, canPressure, mark, phase, onSelect, onPressure }: { player: PlayerState; index: number; self: boolean; host: boolean; accused: boolean; selected: boolean; selectable: boolean; speaking: boolean; suspicion: number; pressureCount: number; pressureMarkedByMe: boolean; canPressure: boolean; mark: -1 | 0 | 1; phase: GameState["phase"]; onSelect: () => void; onPressure: () => void }) {
   return (
-    <button type="button" className={`player-card ${!player.alive ? "dead" : ""} ${accused ? "accused" : ""} ${selected ? "selected" : ""} ${selectable ? "selectable" : ""} ${speaking ? "speaking" : ""}`} onClick={selectable ? onSelect : undefined} aria-disabled={!selectable}>
+    <article className={`player-card ${!player.alive ? "dead" : ""} ${accused ? "accused" : ""} ${selected ? "selected" : ""} ${selectable ? "selectable" : ""} ${speaking ? "speaking" : ""} ${pressureMarkedByMe ? "pressure-marked" : ""}`} onClick={selectable ? onSelect : undefined} role={selectable ? "button" : undefined} tabIndex={selectable ? 0 : undefined} onKeyDown={(event) => { if (selectable && (event.key === "Enter" || event.key === " ")) onSelect(); }}>
       <div className="portrait"><span>{String(index + 1).padStart(2, "0")}</span><b className={`avatar-photo avatar-${index % 12}`} aria-label={`${player.n}의 증거물 토큰`} />{player.connected && <i />}{mark !== 0 && <em className={`intel-mark ${mark === -1 ? "suspect" : "safe"}`}>{mark === -1 ? "의심" : "안전"}</em>}</div>
       {speaking && <div className="speaker-pulse"><i /><i /><i /><span>발언 중</span></div>}
       <div className="player-info"><div><strong>{player.n}</strong>{self && <small>나</small>}{host && <small>방장</small>}{player.bot && <small>AI</small>}{player.voice && <Mic className="voice-presence-icon" size={12} />}{player.mafia && <Skull size={13} />}{player.id && phase === "gameover" && player.role && <small>{ROLE_META[player.role].name}</small>}</div><span>{!player.alive ? "사망" : phase === "lobby" ? host ? "시작 권한 보유" : player.ready ? "준비 완료" : "대기 중" : suspicion > 60 ? "집중 수사 대상" : "생존"}</span></div>
       {phase !== "lobby" && player.alive && <div className="suspicion-meter" aria-label={`공개 의심도 ${suspicion}%`}><i style={{ width: `${suspicion}%` }} /><span>의심 {suspicion}%</span></div>}
+      {(pressureCount > 0 || pressureMarkedByMe) && <div className="pressure-count"><Crosshair size={11} />{pressureMarkedByMe ? "내 긴급 지목" : `${pressureCount} 압박`}</div>}
+      {canPressure && <button className="pressure-action" type="button" onClick={(event) => { event.stopPropagation(); onPressure(); }}><Crosshair size={12} />긴급 지목</button>}
       {player.votes > 0 && <div className="vote-count">{player.votes}표</div>}
       {accused && <div className="accused-mark"><Gavel size={12} />피고</div>}
       {selected && <div className="selected-mark"><Check size={14} /></div>}
-    </button>
+    </article>
   );
 }

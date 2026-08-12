@@ -137,6 +137,10 @@ async def game_socket(
                         str(msg.get("target", "")),
                         str(msg.get("stance", "")),
                     )
+                case "pressure":
+                    error = arena.apply_pressure(
+                        player.id, str(msg.get("target", ""))
+                    )
                 case "will":
                     error = arena.leave_will(player.id, str(msg.get("text", "")))
                 case "voice_presence":

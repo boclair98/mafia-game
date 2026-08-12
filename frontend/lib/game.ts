@@ -26,11 +26,17 @@ export type BallotEntry = { voter_id: string; voter: string; target_id: string; 
 export type CaseClue = { id: string; code: string; round: number; title: string; detail: string; outcome: string; suspect_ids: string[]; suspects: string[] };
 export type PrivateLead = { id: string; title: string; detail: string; suspect_id: string; revealed: boolean };
 export type PublicLead = { id: string; owner_id: string; owner: string; title: string; detail: string; round: number; suspect_id: string };
+export type RoundEvent = { id: string; title: string; tag: string; copy: string; sealed_pressure: boolean };
+export type CaseAward = { id: string; player_id: string; player: string; title: string; copy: string };
 
 export type GameState = {
   t: "state";
   room: string;
   case_profile: CaseProfile;
+  round_event: RoundEvent | null;
+  pressure_counts: Record<string, number>;
+  pressure_progress: { completed: number; total: number; sealed: boolean };
+  awards: CaseAward[];
   phase: Phase;
   round: number;
   deadline: number;
@@ -54,6 +60,7 @@ export type GameState = {
     private_lead: PrivateLead | null;
     ghost_prediction: string | null;
     ghost_correct: boolean | null;
+    pressure_target: string | null;
   };
   story: string[];
   case_log: string[];

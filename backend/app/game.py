@@ -94,6 +94,37 @@ CASE_PROFILES = [
     {"id": "observatory", "code": "BM-042", "title": "관측소의 00시 42분", "location": "북악 천문 관측소", "victim": "천문학자 강이안", "briefing": "관측 기록이 끊긴 90초 사이 사건이 벌어졌습니다. 남겨진 신호는 내부자의 암호입니다."},
 ]
 
+ROUND_EVENTS = [
+    {
+        "id": "red-thread",
+        "title": "붉은 실",
+        "tag": "PUBLIC PRESSURE",
+        "copy": "긴급 지목이 즉시 공개됩니다. 누가 의심의 방향을 만들었는지 추적하세요.",
+        "sealed_pressure": False,
+    },
+    {
+        "id": "blackout",
+        "title": "기록실 정전",
+        "tag": "SEALED PRESSURE",
+        "copy": "긴급 지목은 낮 동안 봉인되고 시민 투표가 시작될 때 한꺼번에 공개됩니다.",
+        "sealed_pressure": True,
+    },
+    {
+        "id": "last-call",
+        "title": "마지막 통화",
+        "tag": "FINAL CALL",
+        "copy": "이번 낮의 긴급 지목은 최종 사건 파일에 결정적 장면으로 기록됩니다.",
+        "sealed_pressure": False,
+    },
+    {
+        "id": "cross-exam",
+        "title": "교차 심문",
+        "tag": "CROSS EXAMINATION",
+        "copy": "말보다 선택이 오래 남습니다. 발언을 들은 뒤 가장 모순된 한 명을 지목하세요.",
+        "sealed_pressure": False,
+    },
+]
+
 LEAD_TEMPLATES = [
     ("출입 시각 기록", "{suspect}님의 출입 기록이 사건 추정 시각과 4분 겹칩니다."),
     ("젖은 외투의 흔적", "현장 창가의 빗물 성분이 {suspect}님의 좌석 주변에서 발견됐습니다."),
@@ -176,6 +207,9 @@ class Room:
         self.private_leads: dict[str, dict[str, Any]] = {}
         self.public_leads: deque[dict[str, Any]] = deque(maxlen=18)
         self.ghost_predictions: dict[str, str] = {}
+        self.round_event: dict[str, Any] | None = None
+        self.pressure_marks: dict[str, str] = {}
+        self.awards: list[dict[str, str | int]] = []
         self._bot_marks: set[str] = set()
         self._bot_suspicions: dict[str, str] = {}
         self._task: asyncio.Task | None = None
@@ -200,6 +234,79 @@ class Room:
             "target": target,
             "round": self.round,
         })
+
+    def _draw_round_event(self) -> None:
+        previous = self.round_event.get("id") if self.round_event else None
+        choices = [event for event in ROUND_EVENTS if event["id"] != previous]
+        self.round_event = dict(random.choice(choices or ROUND_EVENTS))
+        self._record(
+            f"자정 사건 카드 — {self.round_event['title']}: "
+            f"{self.round_event['copy']}"
+        )
+
+    def _build_awards(self) -> None:
+        """Create playful, factual end-of-match accolades from public actions."""
+        awards: list[dict[str, str | int]] = []
+        playable = [p for p in self.players.values() if p.role != "spectator"]
+
+        question_counts = Counter(str(item["from_id"]) for item in self.questions)
+        if question_counts:
+            pid, count = question_counts.most_common(1)[0]
+            player = self.players.get(pid)
+            if player:
+                awards.append({
+                    "id": "interrogator", "player_id": pid, "player": player.nick,
+                    "title": "질문 폭격기", "copy": f"핵심 질문 {count}개로 진술을 흔들었습니다.",
+                })
+
+        claim_counts = Counter(str(item["speaker_id"]) for item in self.claims)
+        if claim_counts:
+            pid, count = claim_counts.most_common(1)[0]
+            player = self.players.get(pid)
+            if player:
+                awards.append({
+                    "id": "archivist", "player_id": pid, "player": player.nick,
+                    "title": "기록 설계자", "copy": f"공식 진술 {count}개를 사건 파일에 남겼습니다.",
+                })
+
+        correct_reads: Counter[str] = Counter()
+        for pid, choices in self.reads.items():
+            for key, stance in choices.items():
+                target = self.players.get(key.split(":", 1)[-1])
+                if target and stance == "suspect" and target.role == "mafia":
+                    correct_reads[pid] += 1
+        if correct_reads:
+            pid, count = correct_reads.most_common(1)[0]
+            player = self.players.get(pid)
+            if player:
+                awards.append({
+                    "id": "hawk-eye", "player_id": pid, "player": player.nick,
+                    "title": "매의 눈", "copy": f"마피아를 향한 의심 판단을 {count}번 적중시켰습니다.",
+                })
+
+        pressure_counts: Counter[str] = Counter()
+        for key, target_id in self.pressure_marks.items():
+            actor_id = key.split(":", 1)[-1]
+            target = self.players.get(target_id)
+            actor = self.players.get(actor_id)
+            if actor and actor.role != "mafia" and target and target.role == "mafia":
+                pressure_counts[actor_id] += 1
+        if pressure_counts:
+            pid, count = pressure_counts.most_common(1)[0]
+            player = self.players.get(pid)
+            if player:
+                awards.append({
+                    "id": "red-thread", "player_id": pid, "player": player.nick,
+                    "title": "붉은 실의 주인", "copy": f"긴급 지목으로 범인을 {count}번 정확히 압박했습니다.",
+                })
+
+        if not awards and playable:
+            survivor = next((p for p in playable if p.alive), playable[0])
+            awards.append({
+                "id": "survivor", "player_id": survivor.id, "player": survivor.nick,
+                "title": "자정의 생존자", "copy": "끝까지 사건의 결말을 지켜봤습니다.",
+            })
+        self.awards = awards[:4]
 
     def _add_forensic_clue(
         self,
@@ -446,6 +553,9 @@ class Room:
         self.private_leads.clear()
         self.public_leads.clear()
         self.ghost_predictions.clear()
+        self.pressure_marks.clear()
+        self.awards.clear()
+        self.round_event = None
         self.reads.clear()
         self.wills.clear()
         self.interrogation_order.clear()
@@ -455,6 +565,7 @@ class Room:
         self.last_death_id = None
         self._record(f"사건 {self.case_profile['code']} · {self.case_profile['title']}. 현장이 봉쇄되었습니다.")
         self._record(self.case_profile["briefing"])
+        self._draw_round_event()
         self._deal_private_leads(active)
         self._bot_marks.clear()
         self._bot_suspicions.clear()
@@ -488,6 +599,9 @@ class Room:
         self.private_leads.clear()
         self.public_leads.clear()
         self.ghost_predictions.clear()
+        self.pressure_marks.clear()
+        self.awards.clear()
+        self.round_event = None
         self.reads.clear()
         self.wills.clear()
         self.interrogation_order.clear()
@@ -564,6 +678,26 @@ class Room:
         if stance not in ALLOWED_READS:
             return "지원하지 않는 판단입니다."
         self.reads.setdefault(pid, {})[f"{self.round}:{target_id}"] = stance
+        return None
+
+    def apply_pressure(self, pid: str, target_id: str) -> str | None:
+        actor = self.players.get(pid)
+        target = self.players.get(target_id)
+        if self.phase != "day" or not actor or not actor.alive:
+            return "낮 토론 중인 생존자만 긴급 지목을 사용할 수 있습니다."
+        if not target or not target.alive or target.id == actor.id:
+            return "다른 생존자 한 명을 지목해 주세요."
+        key = f"{self.round}:{pid}"
+        if key in self.pressure_marks:
+            return "이번 낮의 긴급 지목은 이미 사용했습니다."
+        self.pressure_marks[key] = target_id
+        sealed = bool(self.round_event and self.round_event.get("sealed_pressure"))
+        if sealed:
+            line = f"{actor.nick}님이 긴급 지목을 봉인했습니다."
+        else:
+            line = f"긴급 지목 — {actor.nick}님이 {target.nick}님을 압박했습니다."
+        self._record(line)
+        self._moment("pressure", line, actor=pid, target=target_id)
         return None
 
     def add_question(self, pid: str, raw: str) -> str | None:
@@ -778,6 +912,18 @@ class Room:
             self.speaker_id = None
             self.speaker_deadline = 0.0
             self.votes.clear()
+            if self.round_event and self.round_event.get("sealed_pressure"):
+                for key, target_id in self.pressure_marks.items():
+                    round_text, actor_id = key.split(":", 1)
+                    if int(round_text) != self.round:
+                        continue
+                    actor = self.players.get(actor_id)
+                    target = self.players.get(target_id)
+                    if actor and target:
+                        self._record(
+                            f"긴급 지목 봉인 해제 — {actor.nick}님이 "
+                            f"{target.nick}님을 지목했습니다."
+                        )
             self._record("투표가 시작되었습니다. 가장 의심스러운 사람을 지목하세요.")
             self._set_phase("vote", self._seconds("vote"))
         elif self.phase == "vote":
@@ -797,6 +943,7 @@ class Room:
             self.accused_id = None
             self.judgements.clear()
             self._record(f"{self.round}일차 밤이 찾아왔습니다.")
+            self._draw_round_event()
             self._set_phase("night", self._seconds("night"))
 
     def _seconds(self, phase: str) -> int:
@@ -877,6 +1024,20 @@ class Room:
                     self.actions[bot.id] = random.choice(targets).id
         elif self.phase == "day" and time.time() - self.phase_started_at > 3:
             for bot in bots:
+                pressure_key = f"{self.round}:{bot.id}"
+                elapsed = time.time() - self.phase_started_at
+                duration = max(1.0, self.deadline - self.phase_started_at)
+                if pressure_key not in self.pressure_marks and elapsed > duration * 0.58:
+                    pressure_targets = [p for p in alive if p.id != bot.id]
+                    if bot.role == "mafia":
+                        pressure_targets = [p for p in pressure_targets if p.role != "mafia"]
+                    preferred = self.players.get(self._bot_suspicions.get(bot.id, ""))
+                    target = (
+                        preferred if preferred in pressure_targets
+                        else random.choice(pressure_targets) if pressure_targets else None
+                    )
+                    if target:
+                        self.apply_pressure(bot.id, target.id)
                 if bot.id != self.speaker_id:
                     continue
                 mark = f"day:{self.round}:{bot.id}"
@@ -1088,6 +1249,16 @@ class Room:
             prediction = self.players.get(self.ghost_predictions.get(p.id, ""))
             if p.role != "mafia" and prediction and prediction.role == "mafia":
                 p.score += 15
+            pressure_hits = sum(
+                1
+                for key, target_id in self.pressure_marks.items()
+                if key.split(":", 1)[-1] == p.id
+                and p.role != "mafia"
+                and self.players.get(target_id)
+                and self.players[target_id].role == "mafia"
+            )
+            p.score += pressure_hits * 6
+        self._build_awards()
         self._set_phase("gameover", 0)
         if not any(player.coders_id is not None for player in self.players.values()):
             return
@@ -1136,7 +1307,8 @@ class Room:
         if self.phase == "day":
             speaker = self.players.get(self.speaker_id or "")
             if speaker:
-                return f"자유 토론 중입니다. 현재 {speaker.nick}님이 집중 발언자이며, 모두 대화하면서 질문과 개인 판단을 남길 수 있습니다."
+                event = self.round_event["title"] if self.round_event else "자정 사건"
+                return f"{event} 적용 중. 현재 {speaker.nick}님이 집중 발언자입니다. 질문을 듣고 이번 낮 한 번뿐인 긴급 지목을 신중하게 사용하세요."
             if viewer.intel:
                 return f"최근 조사 기록: {viewer.intel[-1]} 공개할지, 한 턴 더 숨길지 판단하세요."
             return "한 사람을 몰아가기보다 각자 ‘어젯밤 누구를 선택했는지’ 물어보면 모순을 찾기 쉽습니다."
@@ -1175,6 +1347,24 @@ class Room:
             if viewer.role == "mafia" and p.role == "mafia"
         ]
         decision_completed, decision_total = self._decision_progress()
+        pressure_key = f"{self.round}:{viewer.id}"
+        current_pressure = {
+            key.split(":", 1)[1]: target_id
+            for key, target_id in self.pressure_marks.items()
+            if key.startswith(f"{self.round}:")
+        }
+        pressure_visible = not (
+            self.phase == "day"
+            and self.round_event
+            and self.round_event.get("sealed_pressure")
+        )
+        pressure_counts = (
+            Counter(current_pressure.values()) if pressure_visible else Counter()
+        )
+        pressure_total = sum(
+            player.alive and player.role != "spectator"
+            for player in self.players.values()
+        )
         current_reads = {
             key.split(":", 1)[1]: stance
             for key, stance in self.reads.get(viewer.id, {}).items()
@@ -1201,6 +1391,14 @@ class Room:
             "t": "state",
             "room": self.name,
             "case_profile": self.case_profile,
+            "round_event": self.round_event,
+            "pressure_counts": dict(pressure_counts),
+            "pressure_progress": {
+                "completed": len(current_pressure),
+                "total": pressure_total,
+                "sealed": not pressure_visible,
+            },
+            "awards": list(self.awards) if self.phase == "gameover" else [],
             "public_leads": list(self.public_leads),
             "phase": self.phase,
             "round": self.round,
@@ -1250,6 +1448,7 @@ class Room:
                     and self.ghost_predictions.get(viewer.id) in self.players
                     and self.players[self.ghost_predictions[viewer.id]].role == "mafia"
                 ) if viewer.id in self.ghost_predictions else None,
+                "pressure_target": self.pressure_marks.get(pressure_key),
             },
             "accused_id": self.accused_id,
             "judgement_counts": {
