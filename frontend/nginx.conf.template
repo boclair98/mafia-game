@@ -97,7 +97,7 @@ server {
   # A service worker and the HTML shell are release pointers, not immutable
   # assets. They must be revalidated so a mobile/PWA client never combines an
   # old app shell with chunks from the newly released container.
-  location = /sw.js {
+  location ~ ^/sw(?:-v[0-9]+)?\.js$ {
     expires -1;
     add_header Cache-Control "no-store, no-cache, must-revalidate" always;
     try_files /sw.js =404;

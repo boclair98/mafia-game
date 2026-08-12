@@ -214,7 +214,7 @@ export default function GamePage() {
       setTermsAccepted(localStorage.getItem("black-midnight:terms-v1") === "1");
       try { setBlockedPlayers(JSON.parse(localStorage.getItem("black-midnight:blocked") || "[]") as string[]); } catch { localStorage.removeItem("black-midnight:blocked"); }
     });
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw-v6.js").catch(() => undefined);
     const onInstall = (event: Event) => {
       event.preventDefault();
       setInstallPrompt(event as InstallPromptEvent);
