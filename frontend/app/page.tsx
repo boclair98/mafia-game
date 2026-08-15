@@ -171,6 +171,7 @@ export default function GamePage() {
   const [blockedPlayers, setBlockedPlayers] = useState<string[]>([]);
   const [evidence, setEvidence] = useState<Record<string, -1 | 0 | 1>>({});
   const [mobileTab, setMobileTab] = useState<"case" | "suspects" | "talk" | "role">("suspects");
+  const [seenChatCount, setSeenChatCount] = useState(0);
   const [phaseAlert, setPhaseAlert] = useState<GameState["phase"] | null>(null);
   const [decisionFlash, setDecisionFlash] = useState<{ label: string; target: string } | null>(null);
   const [ballotReveal, setBallotReveal] = useState<{ entries: GameState["ballot_feed"]; visible: number } | null>(null);
@@ -197,6 +198,7 @@ export default function GamePage() {
   ));
   const voicePeerKey = game?.players.filter((player) => player.voice && !player.bot && player.id !== game.me.id && !blockedPlayers.includes(player.id)).map((player) => player.id).sort().join("|") ?? "";
   const myVoicePresent = game?.players.find((player) => player.id === game.me.id)?.voice ?? false;
+  const unreadChatCount = mobileTab === "talk" ? 0 : Math.max(0, (game?.chat.length ?? 0) - seenChatCount);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -294,7 +296,13 @@ export default function GamePage() {
     if (changed) {
       lastCountdownBeep.current = null;
       setPhaseAlert(game.phase);
-      setMobileTab(game.phase === "reveal" ? "role" : ["dawn", "result", "gameover"].includes(game.phase) ? "case" : "suspects");
+      setSelected(game.phase === "night" ? game.me.action_target : game.phase === "vote" ? game.me.vote_target : null);
+      setMobileTab(
+        game.phase === "reveal" ? "role"
+          : ["day", "defense"].includes(game.phase) ? "talk"
+            : ["dawn", "result", "gameover"].includes(game.phase) ? "case"
+              : "suspects",
+      );
       if (phaseAlertTimer.current) window.clearTimeout(phaseAlertTimer.current);
       phaseAlertTimer.current = window.setTimeout(() => setPhaseAlert(null), 3400);
       if (ballotRevealTimer.current) window.clearTimeout(ballotRevealTimer.current);
@@ -1128,6 +1136,8 @@ export default function GamePage() {
       </div>
       <div className={`mobile-command-dock command-${game.phase}`}>
         <span><small>{game.phase === "night" ? "NIGHT ORDER" : game.phase === "vote" ? "SEALED BALLOT" : game.phase === "verdict" ? "FINAL VERDICT" : "CURRENT OBJECTIVE"}</small><b>{remaining > 0 ? `${remaining}초 · ` : ""}{currentDirective}</b></span>
+        {game.phase === "lobby" && game.host === game.me.id && <button className="primary" disabled={game.players.length >= game.min_players && unreadyPlayers.length > 0} onClick={() => game.players.length < game.min_players ? send({ t: "fill_bots", target: game.min_players }) : send({ t: "start" })}>{game.players.length < game.min_players ? `AI ${game.min_players}명 채우기` : unreadyPlayers.length ? "준비 대기" : "게임 시작"}</button>}
+        {game.phase === "lobby" && game.host !== game.me.id && <button className={me?.ready ? "" : "primary"} onClick={() => send({ t: "ready" })}>{me?.ready ? "준비 취소" : "준비하기"}</button>}
         {game.phase === "night" && game.me.alive && ["mafia", "doctor", "detective", "bodyguard"].includes(role) && <button className="primary" onClick={() => selected ? commitDecision("action") : setMobileTab("suspects")}>{selected ? "명령 봉인" : "대상 선택"}</button>}
         {game.phase === "vote" && game.me.alive && <button className="danger" onClick={() => selected ? commitDecision("vote") : setMobileTab("suspects")}>{selected ? "표 봉인" : "용의자 선택"}</button>}
         {game.phase === "day" && <button onClick={() => setMobileTab("talk")}>{isCurrentSpeaker ? "내 진술 열기" : "토론 참여"}</button>}
@@ -1135,10 +1145,10 @@ export default function GamePage() {
         {game.phase === "verdict" && game.me.alive && !isAccused && <div><button onClick={() => commitJudgement(false)}>석방</button><button className="danger" onClick={() => commitJudgement(true)}>처형</button></div>}
       </div>
       <nav className="mobile-game-nav" aria-label="모바일 게임 메뉴">
-        <button className={mobileTab === "case" ? "active" : ""} onClick={() => setMobileTab("case")}><BookOpen size={19} /><span>사건</span>{game.clues.length > 0 && <i>{game.clues.length}</i>}</button>
-        <button className={mobileTab === "suspects" ? "active" : ""} onClick={() => setMobileTab("suspects")}><Search size={19} /><span>수사</span></button>
-        <button className={mobileTab === "talk" ? "active" : ""} onClick={() => setMobileTab("talk")}><MessageCircle size={19} /><span>대화</span>{game.chat.length > 0 && <i>{Math.min(9, game.chat.length)}</i>}</button>
-        <button className={mobileTab === "role" ? "active" : ""} onClick={() => setMobileTab("role")}><ShieldQuestion size={19} /><span>{!game.me.alive && role !== "mafia" ? "사후 수사" : "내 정보"}</span></button>
+        <button className={mobileTab === "case" ? "active" : ""} onClick={() => { if (mobileTab === "talk") setSeenChatCount(game.chat.length); setMobileTab("case"); }}><BookOpen size={19} /><span>사건</span>{game.clues.length > 0 && <i>{game.clues.length}</i>}</button>
+        <button className={mobileTab === "suspects" ? "active" : ""} onClick={() => { if (mobileTab === "talk") setSeenChatCount(game.chat.length); setMobileTab("suspects"); }}><Search size={19} /><span>수사</span></button>
+        <button className={mobileTab === "talk" ? "active" : ""} onClick={() => { setMobileTab("talk"); setSeenChatCount(game.chat.length); }}><MessageCircle size={19} /><span>대화</span>{unreadChatCount > 0 && <i>{Math.min(9, unreadChatCount)}</i>}</button>
+        <button className={mobileTab === "role" ? "active" : ""} onClick={() => { if (mobileTab === "talk") setSeenChatCount(game.chat.length); setMobileTab("role"); }}><ShieldQuestion size={19} /><span>{!game.me.alive && role !== "mafia" ? "사후 수사" : "내 정보"}</span></button>
       </nav>
       {tutorialOpen && <TutorialModal step={tutorialStep} setStep={setTutorialStep} onClose={closeTutorial} />}
       {inviteOpen && <InviteModal room={room} online={game.players.filter((player) => player.connected).length} copied={copied} onClose={() => setInviteOpen(false)} onCopy={copyInvite} onShare={shareInvite} onPoster={() => createPoster("invite")} />}
