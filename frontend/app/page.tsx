@@ -153,6 +153,7 @@ export default function GamePage() {
   const [stats, setStats] = useState<LocalStats>({ games: 0, wins: 0, streak: 0 });
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
+  const [joinOpen, setJoinOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [caseOpen, setCaseOpen] = useState(false);
   const [rankingOpen, setRankingOpen] = useState(false);
@@ -258,13 +259,14 @@ export default function GamePage() {
   }, []);
 
   useEffect(() => {
-    const modalOpen = tutorialOpen || inviteOpen || caseOpen || rankingOpen || settingsOpen || Boolean(legalPage) || Boolean(reportTarget);
+    const modalOpen = joinOpen || tutorialOpen || inviteOpen || caseOpen || rankingOpen || settingsOpen || Boolean(legalPage) || Boolean(reportTarget);
     if (!modalOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const closeTopModal = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (caseOpen) setCaseOpen(false);
+      if (joinOpen) setJoinOpen(false);
+      else if (caseOpen) setCaseOpen(false);
       else if (reportTarget) setReportTarget(null);
       else if (legalPage) setLegalPage(null);
       else if (settingsOpen) setSettingsOpen(false);
@@ -280,7 +282,7 @@ export default function GamePage() {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", closeTopModal);
     };
-  }, [caseOpen, inviteOpen, legalPage, rankingOpen, reportTarget, settingsOpen, tutorialOpen]);
+  }, [caseOpen, inviteOpen, joinOpen, legalPage, rankingOpen, reportTarget, settingsOpen, tutorialOpen]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -827,8 +829,8 @@ export default function GamePage() {
   };
 
   const focusJoinCard = () => {
-    document.querySelector<HTMLElement>(".join-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
-    window.setTimeout(() => document.querySelector<HTMLInputElement>("#landing-nick")?.focus(), 480);
+    setJoinOpen(true);
+    window.setTimeout(() => document.querySelector<HTMLInputElement>("#landing-nick")?.focus(), 180);
   };
 
   const landingSceneMeta = LANDING_SCENES[landingScene];
@@ -840,50 +842,79 @@ export default function GamePage() {
       <main className="landing-shell">
         <div className="grain" />
         {notice && <div className="toast">{notice}</div>}
-        <div className="landing-atmosphere" aria-hidden="true"><i /><i /><i /><span /></div>
-        <header className="landing-nav"><div><Search size={17} /><b>검은 자정 · 사건 파일</b></div><button className="landing-settings" onClick={() => setSettingsOpen(true)} aria-label="설정과 운영 정책"><Settings size={16} /></button><span><i />INVESTIGATION NETWORK{networkStatus ? ` · ${networkStatus.players}명 접속 · ${networkStatus.active_matches}건 수사 중` : ""}</span></header>
-        <div className="city-coordinate"><span>37°34&apos;N · 126°58&apos;E</span><b>MIDNIGHT DISTRICT / LIVE FEED 00:42</b></div>
-        <section className="landing-copy">
-          <div className="eyebrow"><span /> INTERACTIVE MURDER MYSTERY</div>
-          <h1><span>검은</span> <em>자정</em></h1>
-          <p className="hero-line">한 명이 죽었다. 범인은 아직 이 방 안에 있다.</p>
-          <div className="mafia-warning"><Search size={18} /><span><b>CASE 042 · 밀실 살인</b><small>현장 단서를 대조하고, 거짓 알리바이를 깨고, 범인을 찾아내라.</small></span><i>UNSOLVED</i></div>
-          <div key={landingSceneMeta.tag} className={`landing-live-case tone-${landingSceneMeta.tone}`} aria-live="polite">
-            <div className="live-case-visual"><LandingSceneIcon size={23} /><span><i />LIVE CASE</span></div>
-            <div className="live-case-copy"><small>{landingSceneMeta.tag}</small><b>{landingSceneMeta.title}</b><p>{landingSceneMeta.copy}</p></div>
-            <div className="live-case-steps">{LANDING_SCENES.map((scene, index) => <button key={scene.tag} className={index === landingScene ? "active" : ""} onClick={() => setLandingScene(index)} aria-label={`${scene.title} 미리보기`}><i /></button>)}</div>
+        <header className="campaign-nav">
+          <button className="campaign-brand" type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}><span>BLACK MIDNIGHT</span><b>검은 자정</b></button>
+          <nav aria-label="게임 안내">
+            <button type="button" onClick={() => document.querySelector("#case-world")?.scrollIntoView({ behavior: "smooth" })}>게임 소개</button>
+            <button type="button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}>플레이 가이드</button>
+            <button type="button" onClick={() => setRankingOpen(true)}>기록 보관소</button>
+          </nav>
+          <div className="campaign-status"><i />{networkStatus ? `${networkStatus.players}명 수사 중` : "LIVE"}</div>
+          <button className="campaign-settings" onClick={() => setSettingsOpen(true)} aria-label="설정과 운영 정책"><Settings size={18} /></button>
+        </header>
+
+        <section className="campaign-hero">
+          <div className="campaign-hero-shade" aria-hidden="true" />
+          <div className="campaign-case-mark"><span>CASE FILE</span><b>NO. 042</b></div>
+          <div className="campaign-hero-copy">
+            <span className="campaign-overline">INTERACTIVE MURDER MYSTERY</span>
+            <p className="campaign-date">자정 00:42 · 밀실에 남겨진 일곱 개의 거짓말</p>
+            <h1><span>검은</span><em>자정</em></h1>
+            <p className="campaign-tagline">한 명이 죽었다.<br />범인은 아직 이 방 안에 있다.</p>
+            <button className="campaign-play" type="button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }} aria-label="30초 사건 브리핑 재생"><span><Film size={22} /></span><b>30초 사건 브리핑</b></button>
+            <div className="campaign-actions">
+              <button className="campaign-primary" type="button" onClick={focusJoinCard}><span>{invitedByLink ? "초대받은 사건에 합류" : "사건 수사 시작"}</span><ChevronRight size={19} /></button>
+              <button className="campaign-secondary" type="button" onClick={focusJoinCard}><Users size={17} />친구 방 코드로 합류</button>
+            </div>
+            <div className="campaign-proof"><span><Check size={12} />설치 없이 시작</span><span><Mic size={12} />실시간 음성</span><span><Users size={12} />4–12인 추리</span></div>
           </div>
-          <div className="role-selector">
-            <div className="role-strip">{LANDING_ROLES.map((item, index) => <button type="button" key={item.code} className={`landing-role ${index === landingRole ? "active" : ""}`} onClick={() => setLandingRole(index)}><div className={`role-face avatar-photo avatar-${item.avatar}`} /><span><small>{item.code}</small><b>{item.name}</b><em>{item.tagline}</em></span></button>)}</div>
-            <div className="role-whisper"><span>{landingRoleMeta.name} 생존 전략</span><p>{landingRoleMeta.copy}</p></div>
-          </div>
-          <button className="hero-join-cta" type="button" onClick={focusJoinCard}><span><b>{invitedByLink ? "초대받은 수사에 합류" : "새 사건 수사 시작"}</b><small>모바일·PC 어디서나 설치 없이 바로 입장</small></span><ChevronRight size={18} /></button>
-          <div className="local-stats"><div><b>{stats.games}</b><span>플레이</span></div><div><b>{stats.wins}</b><span>승리</span></div><div><b>{stats.streak}</b><span>연승</span></div></div>
-          <button className="ranking-launch" type="button" onClick={() => setRankingOpen(true)}><Trophy size={16} /><span><b>명예의 전당</b><small>{leaderboard[0] ? `현재 1위 ${leaderboard[0].name} · ${leaderboard[0].best_score}점` : "첫 번째 전설이 되어보세요"}</small></span><ChevronRight size={16} /></button>
-          <button className="briefing-launch" type="button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}><Film size={16} /><span><b>30초 사건 브리핑</b><small>룰을 몰라도 장면으로 한 번에 이해하기</small></span><ChevronRight size={16} /></button>
+          <button className="campaign-scroll" type="button" onClick={() => document.querySelector("#case-world")?.scrollIntoView({ behavior: "smooth" })}><span>사건 속으로</span><ChevronRight size={16} /></button>
         </section>
-        <section className="join-card">
-          <div className="join-scanline" />
-          <div className="join-card-top">
-            <span>PRIVATE TABLE</span>
-            <span className="live-dot">온라인</span>
+
+        <section className="campaign-world" id="case-world">
+          <div className="campaign-section-heading"><span>THE NIGHT BEGINS</span><h2>당신의 한마디가<br />사건의 결말을 바꾼다</h2><p>정답을 고르는 게임이 아닙니다. 단서를 읽고, 목소리를 듣고, 누군가의 거짓말을 끝까지 추적하세요.</p></div>
+          <div className="campaign-scene-grid">
+            {LANDING_SCENES.map((scene, index) => {
+              const SceneIcon = scene.icon;
+              return <button type="button" key={scene.tag} className={index === landingScene ? "active" : ""} onClick={() => setLandingScene(index)}><span className="campaign-scene-no">0{index + 1}</span><SceneIcon size={24} /><small>{scene.tag}</small><b>{scene.title}</b><p>{scene.copy}</p><i /></button>;
+            })}
           </div>
-          {invitedByLink && <div className="invited-room"><UserPlus size={15} /><span><b>비밀 초대장이 도착했습니다</b><small>{roomInput} 사건의 자리가 확보되어 있습니다.</small></span></div>}
-          <div className="join-presence"><div><span className="avatar-photo avatar-1" /><span className="avatar-photo avatar-4" /><span className="avatar-photo avatar-7" /></div><p>{networkStatus ? <><b>{networkStatus.players}명</b>이 현재 도시 네트워크에 접속 중</> : <>실시간 도시 네트워크 연결 중</>}</p></div>
-          <h2>{invitedByLink ? "수사 초대에 응답" : "사건 담당자 등록"}</h2>
-          <p>수사에서 사용할 이름을 정하세요. 입장 후 누군가는 범인, 누군가는 진실을 쫓는 역할을 받습니다.</p>
-          <div className="join-steps"><span className="active"><b>01</b>이름 설정</span><i /><span><b>02</b>친구 합류</span><i /><span><b>03</b>역할 봉인</span></div>
-          <div className="join-warning"><Skull size={14} /><span>입장 후 배역은 봉인됩니다. 아무도 믿지 마세요.</span></div>
-          <form onSubmit={submitJoin}>
-            <label><span>당신의 이름 <em>{nick.length}/16</em></span><input id="landing-nick" value={nick} onChange={(e) => setNick(e.target.value)} placeholder="게임에서 불릴 이름" maxLength={16} /></label>
-            <label><span>비밀 방 코드 <em>{invitedByLink ? "초대 링크에서 확인됨" : "친구와 공유할 코드"}</em></span><div className="room-field"><input value={roomInput} onChange={(e) => { setRoomInput(e.target.value); setInvitedByLink(false); }} maxLength={32} /><button type="button" onClick={() => { setRoomInput(makeRoom()); setInvitedByLink(false); }} aria-label="새 방 코드 만들기"><RotateCcw size={15} /></button></div></label>
-            <label className="terms-check"><input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span><b>커뮤니티 규칙과 이용약관에 동의합니다</b><small><button type="button" onClick={() => setLegalPage("terms")}>이용약관</button> · <button type="button" onClick={() => setLegalPage("community")}>커뮤니티 가이드</button> · <button type="button" onClick={() => setLegalPage("privacy")}>개인정보</button></small></span></label>
-            <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim() || !termsAccepted}><LogIn size={18} /><span>{!termsAccepted ? "규칙에 동의하고 입장" : nick.trim() ? `${nick.trim()}님으로 수사 합류` : "이름을 입력하고 수사 합류"}</span><ChevronRight size={16} /></button>
-          </form>
-          {installPrompt && <button className="install-button" type="button" onClick={installApp}><Smartphone size={16} /> 홈 화면에 앱 설치</button>}
-          <div className="join-proof"><span><Check size={12} />설치 없음</span><span><Check size={12} />AI 인원 채우기</span><span><Check size={12} />실시간 음성</span></div>
-          <div className="join-foot"><Users size={15} /> 최소 4명부터 시작 · 최대 12명 · 초보자 브리핑 제공</div>
+          <div key={landingSceneMeta.tag} className="campaign-live-line" aria-live="polite"><LandingSceneIcon size={18} /><span><small>LIVE CASE · {landingSceneMeta.tag}</small><b>{landingSceneMeta.title}</b></span><p>{landingSceneMeta.copy}</p></div>
         </section>
+
+        <section className="campaign-roles">
+          <div className="campaign-section-heading"><span>TRUST NO ONE</span><h2>누구로 깨어날지는<br />봉인을 열기 전까지 모른다</h2></div>
+          <div className="campaign-role-grid">{LANDING_ROLES.map((item, index) => <button type="button" key={item.code} className={index === landingRole ? "active" : ""} onClick={() => setLandingRole(index)}><small>{item.code}</small><span>0{index + 1}</span><b>{item.name}</b><em>{item.tagline}</em></button>)}</div>
+          <div className="campaign-role-brief"><span><LockKeyhole size={15} />{landingRoleMeta.name} · 봉인된 생존 지침</span><p>{landingRoleMeta.copy}</p></div>
+        </section>
+
+        <section className="campaign-final-cta">
+          <span>YOUR TESTIMONY CHANGES EVERYTHING</span><h2>오늘 밤, 당신은<br />누구를 믿겠습니까?</h2><button type="button" onClick={focusJoinCard}>{invitedByLink ? "초대장 열기" : "첫 번째 사건 시작"}<ChevronRight size={19} /></button>
+          <div className="campaign-record"><button type="button" onClick={() => setRankingOpen(true)}><Trophy size={15} />{leaderboard[0] ? `현재 최고 기록 ${leaderboard[0].name} · ${leaderboard[0].best_score}점` : "첫 번째 전설이 되어보세요"}</button><span>{stats.games} PLAY · {stats.wins} WIN · {stats.streak} STREAK</span></div>
+        </section>
+
+        {joinOpen && <div className="join-gate" role="dialog" aria-modal="true" aria-labelledby="join-gate-title" onMouseDown={(event) => { if (event.target === event.currentTarget) setJoinOpen(false); }}>
+          <section className="join-card">
+            <button className="join-gate-close" type="button" onClick={() => setJoinOpen(false)} aria-label="입장 패널 닫기"><X size={20} /></button>
+            <div className="join-scanline" />
+            <div className="join-card-top"><span>PRIVATE CASE TABLE</span><span className="live-dot">온라인</span></div>
+            {invitedByLink && <div className="invited-room"><UserPlus size={15} /><span><b>비밀 초대장이 도착했습니다</b><small>{roomInput} 사건의 자리가 확보되어 있습니다.</small></span></div>}
+            <div className="join-object-seal" aria-hidden="true"><LockKeyhole size={24} /><span>SEALED</span></div>
+            <h2 id="join-gate-title">{invitedByLink ? "수사 초대에 응답" : "사건 담당자 등록"}</h2>
+            <p>수사에서 사용할 이름을 정하세요. 입장하는 순간 당신의 역할과 비밀 지침이 봉인됩니다.</p>
+            <div className="join-steps"><span className="active"><b>01</b>이름 설정</span><i /><span><b>02</b>친구 합류</span><i /><span><b>03</b>역할 봉인</span></div>
+            <div className="join-warning"><Skull size={14} /><span>아무도 믿지 마세요. 목소리도 단서가 됩니다.</span></div>
+            <form onSubmit={submitJoin}>
+              <label><span>당신의 이름 <em>{nick.length}/16</em></span><input id="landing-nick" value={nick} onChange={(e) => setNick(e.target.value)} placeholder="게임에서 불릴 이름" maxLength={16} /></label>
+              <label><span>비밀 방 코드 <em>{invitedByLink ? "초대 링크에서 확인됨" : "친구와 공유할 코드"}</em></span><div className="room-field"><input value={roomInput} onChange={(e) => { setRoomInput(e.target.value); setInvitedByLink(false); }} maxLength={32} /><button type="button" onClick={() => { setRoomInput(makeRoom()); setInvitedByLink(false); }} aria-label="새 방 코드 만들기"><RotateCcw size={15} /></button></div></label>
+              <label className="terms-check"><input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span><b>커뮤니티 규칙과 이용약관에 동의합니다</b><small><button type="button" onClick={() => setLegalPage("terms")}>이용약관</button> · <button type="button" onClick={() => setLegalPage("community")}>커뮤니티 가이드</button> · <button type="button" onClick={() => setLegalPage("privacy")}>개인정보</button></small></span></label>
+              <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim() || !termsAccepted}><LogIn size={18} /><span>{!termsAccepted ? "규칙에 동의하고 입장" : nick.trim() ? `${nick.trim()}님으로 수사 합류` : "이름을 입력하고 수사 합류"}</span><ChevronRight size={16} /></button>
+            </form>
+            {installPrompt && <button className="install-button" type="button" onClick={installApp}><Smartphone size={16} /> 홈 화면에 앱 설치</button>}
+            <div className="join-proof"><span><Check size={12} />설치 없음</span><span><Check size={12} />AI 인원 채우기</span><span><Check size={12} />실시간 음성</span></div>
+            <div className="join-foot"><Users size={15} /> 최소 4명부터 시작 · 최대 12명 · 초보자 브리핑 제공</div>
+          </section>
+        </div>}
         {tutorialOpen && <TutorialModal step={tutorialStep} setStep={setTutorialStep} onClose={closeTutorial} />}
         {rankingOpen && <RankingModal entries={leaderboard} signedIn={Boolean(identity)} onClose={() => setRankingOpen(false)} />}
         {settingsOpen && <SettingsModal voiceOn={voiceOn} soundOn={soundOn} onVoice={toggleVoice} onSound={toggleSound} onLegal={setLegalPage} onClose={() => setSettingsOpen(false)} />}

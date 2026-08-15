@@ -7,6 +7,8 @@ const SHELL = [
   "/icon-512.png",
   "/mafia-table-wide-v2.webp",
   "/mafia-table-mobile-v2.webp",
+  "/black-midnight-cinematic-wide-v1.png",
+  "/black-midnight-cinematic-mobile-v1.png",
   "/evidence-token-atlas.webp",
   "/case-room-wide.webp",
   "/case-room-mobile.webp",

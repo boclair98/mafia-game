@@ -15,7 +15,7 @@ Web, Android, iOS에서 같은 실시간 사건을 공유하는 모바일 우선
 
 **운영 서비스:** [https://black-midnight.coders.kr](https://black-midnight.coders.kr)
 
-![사람 없이 사건 도구와 빈 좌석으로 구성한 검은 자정 협의실](frontend/public/mafia-table-wide-v2.webp)
+![사람 없이 봉인 문서와 증거물로 구성한 검은 자정 사건 현장](frontend/public/black-midnight-cinematic-wide-v1.png)
 
 ## 30초 만에 시작하기
 
