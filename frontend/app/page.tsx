@@ -501,6 +501,21 @@ export default function GamePage() {
     return () => socket.close();
   }, [joined, room, nick]);
 
+  // The landing page is intentionally long. When a player opens the join
+  // sheet from its lower CTA, browsers preserve the old scroll offset while
+  // replacing the landing tree with the game tree. Always start the case at
+  // the top so the room header and phase director are immediately visible.
+  useEffect(() => {
+    if (!joined) return;
+    const reset = () => {
+      window.scrollTo(0, 0);
+      const shell = document.querySelector<HTMLElement>(".game-shell");
+      if (shell) shell.scrollTop = 0;
+    };
+    const frame = window.requestAnimationFrame(reset);
+    return () => window.cancelAnimationFrame(frame);
+  }, [joined, room]);
+
   useEffect(() => {
     if (!ballotReveal) return;
     if (ballotReveal.visible < ballotReveal.entries.length) {
