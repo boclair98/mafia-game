@@ -21,6 +21,10 @@ export type ConnStatus = "connecting" | "open" | "reconnecting" | "failed";
 const PING_INTERVAL_MS = 20_000;
 const BACKOFF_BASE_MS = 500;
 const BACKOFF_CAP_MS = 8_000;
+// A cold-started API can take roughly 30 seconds to accept its first socket.
+// Keep the initial window generous, but never leave the lobby spinner waiting
+// forever when a proxy or websocket upgrade is genuinely unavailable.
+const CONNECT_TIMEOUT_MS = 45_000;
 
 export function gameSocketUrl(room: string, nick: string, key: string): string {
   const query = `room=${encodeURIComponent(room)}&nick=${encodeURIComponent(nick)}&key=${encodeURIComponent(key)}`;
@@ -49,6 +53,7 @@ export class GameSocket {
   private closed = false;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly url: string,
@@ -71,14 +76,23 @@ export class GameSocket {
     this.closed = true;
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.connectTimer) clearTimeout(this.connectTimer);
     this.ws?.close();
   }
 
   private connect(): void {
     this.handlers.onStatus(this.attempts === 0 ? "connecting" : "reconnecting");
     const ws = (this.ws = new WebSocket(this.url));
+    this.connectTimer = setTimeout(() => {
+      if (this.closed || this.ws !== ws || ws.readyState !== WebSocket.CONNECTING) return;
+      // Closing a stalled handshake funnels through the same backoff path as
+      // a normal dropped socket and gives the UI a recoverable state.
+      ws.close();
+    }, CONNECT_TIMEOUT_MS);
 
     ws.onopen = () => {
+      if (this.connectTimer) clearTimeout(this.connectTimer);
+      this.connectTimer = null;
       this.attempts = 0;
       this.handlers.onStatus("open");
       if (this.pingTimer) clearInterval(this.pingTimer);
@@ -98,6 +112,8 @@ export class GameSocket {
 
     // onerror always precedes onclose; reconnect logic lives in one place.
     ws.onclose = (event) => {
+      if (this.connectTimer) clearTimeout(this.connectTimer);
+      this.connectTimer = null;
       if (this.pingTimer) clearInterval(this.pingTimer);
       this.pingTimer = null;
       if (this.closed) return;

@@ -535,6 +535,17 @@ export default function GamePage() {
     setJoined(true);
   };
 
+  const cancelJoin = () => {
+    socketRef.current?.close();
+    socketRef.current = null;
+    setJoined(false);
+    setWelcome(null);
+    setGame(null);
+    setStatus("connecting");
+    setNotice("입장을 취소했습니다. 방 코드를 확인한 뒤 다시 시도해 주세요.");
+    window.setTimeout(() => setNotice(""), 3200);
+  };
+
   const send = (message: object) => {
     const sent = socketRef.current?.send(message) ?? false;
     if (!sent) {
@@ -932,7 +943,22 @@ export default function GamePage() {
   }
 
   if (!game || !welcome) {
-    return <main className="loading-screen"><Moon className="moon-loader" /><p>도시의 불을 끄는 중…</p></main>;
+    const loadingTitle = status === "reconnecting" ? "사건 서버에 다시 연결하는 중…" : "사건 서버에 연결하는 중…";
+    const loadingCopy = status === "reconnecting"
+      ? "연결이 잠시 끊겼습니다. 방과 참가자 정보는 유지됩니다."
+      : "첫 접속은 서버가 깨어나는 동안 최대 30초가 걸릴 수 있습니다.";
+    return (
+      <main className="loading-screen">
+        <div className="loading-card" role="status" aria-live="polite">
+          <Moon className="moon-loader" />
+          <span className="loading-kicker">ROOM · {room || "UNKNOWN"}</span>
+          <h1>{loadingTitle}</h1>
+          <p>{loadingCopy}</p>
+          <div className="loading-progress" aria-hidden="true"><i /></div>
+          <button type="button" onClick={cancelJoin}><ChevronLeft size={15} /> 입장 화면으로 돌아가기</button>
+        </div>
+      </main>
+    );
   }
 
   return (
