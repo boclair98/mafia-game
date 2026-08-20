@@ -26,12 +26,15 @@ else:
 MIN_PLAYERS = 4
 MAX_PLAYERS = 12
 PACE_SECONDS = {
-    "quick": {"reveal": 12, "night": 45, "dawn": 10, "day": 90, "vote": 40, "defense": 35, "verdict": 30, "result": 10},
-    "classic": {"reveal": 15, "night": 60, "dawn": 12, "day": 150, "vote": 60, "defense": 60, "verdict": 45, "result": 12},
+    # Even the quick table leaves room for the announcer, role reveal, and a
+    # complete thought before the next phase arrives. The old 12/40 second
+    # windows made a first-time player miss the hand-off between screens.
+    "quick": {"reveal": 18, "night": 70, "dawn": 18, "day": 180, "vote": 75, "defense": 60, "verdict": 55, "result": 18},
+    "classic": {"reveal": 24, "night": 90, "dawn": 24, "day": 240, "vote": 100, "defense": 80, "verdict": 70, "result": 24},
 }
 EARLY_ADVANCE_MINIMUM = {
-    "quick": {"night": 20, "vote": 18, "verdict": 15},
-    "classic": {"night": 30, "vote": 25, "verdict": 20},
+    "quick": {"night": 45, "vote": 40, "verdict": 35},
+    "classic": {"night": 60, "vote": 60, "verdict": 50},
 }
 
 _ROOM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")

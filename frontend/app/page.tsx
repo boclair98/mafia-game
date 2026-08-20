@@ -91,6 +91,7 @@ function phaseNarration(game: GameState, phase: GameState["phase"]) {
 const PHASE_TRACK: GameState["phase"][] = ["reveal", "night", "dawn", "day", "vote", "defense", "verdict", "result"];
 const PHASE_THREAT: Record<GameState["phase"], number> = { lobby: 8, reveal: 24, night: 72, dawn: 58, day: 42, vote: 82, defense: 88, verdict: 96, result: 94, gameover: 100 };
 const REACTION_EMOJIS = ["👀", "⚠️", "👍", "🤥", "❓", "🩸"];
+const VOICE_PREF_KEY = "black-midnight:voice-v2";
 type AudioWindow = Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
 
 const TUTORIAL_SCENES = [
@@ -233,9 +234,10 @@ export default function GamePage() {
       if (savedStats) {
         try { setStats(JSON.parse(savedStats) as LocalStats); } catch { localStorage.removeItem("black-midnight:stats"); }
       }
-      // Audio is part of the core case experience by default. A saved "0"
-      // remains an explicit opt-out for players who need a silent session.
-      setVoiceOn(localStorage.getItem("black-midnight:voice") !== "0");
+      // Audio is part of the core case experience by default. v2 deliberately
+      // ignores the old opt-out key so returning players get the new default;
+      // a new explicit mute choice is still persisted below.
+      setVoiceOn(localStorage.getItem(VOICE_PREF_KEY) !== "0");
       setSoundOn(localStorage.getItem("black-midnight:sound") !== "0");
       setTermsAccepted(localStorage.getItem("black-midnight:terms-v1") === "1");
       try { setBlockedPlayers(JSON.parse(localStorage.getItem("black-midnight:blocked") || "[]") as string[]); } catch { localStorage.removeItem("black-midnight:blocked"); }
@@ -327,10 +329,12 @@ export default function GamePage() {
               : "suspects",
       );
       if (phaseAlertTimer.current) window.clearTimeout(phaseAlertTimer.current);
-      phaseAlertTimer.current = window.setTimeout(() => setPhaseAlert(null), 3400);
+      // Keep the director card on screen long enough to read the objective,
+      // hear the announcer, and find the matching action tab.
+      phaseAlertTimer.current = window.setTimeout(() => setPhaseAlert(null), 7000);
       if (ballotRevealTimer.current) window.clearTimeout(ballotRevealTimer.current);
       if (game.phase === "defense" && game.ballot_feed.length) {
-        ballotRevealTimer.current = window.setTimeout(() => setBallotReveal({ entries: game.ballot_feed, visible: 0 }), 3600);
+        ballotRevealTimer.current = window.setTimeout(() => setBallotReveal({ entries: game.ballot_feed, visible: 0 }), 6500);
       }
     }
     if (previousPhase.current && previousPhase.current !== game.phase && "vibrate" in navigator) {
@@ -364,8 +368,10 @@ export default function GamePage() {
       sealed_pressure: roundEventSealed,
     };
     previousEvent.current = roundEventId;
-    const showTimer = window.setTimeout(() => setEventReveal(event), 3600);
-    const hideTimer = window.setTimeout(() => setEventReveal(null), 7100);
+    // Let the phase director finish first; the round event is the second
+    // beat, not a competing overlay that hides the objective card.
+    const showTimer = window.setTimeout(() => setEventReveal(event), 7800);
+    const hideTimer = window.setTimeout(() => setEventReveal(null), 15600);
     return () => {
       window.clearTimeout(showTimer);
       window.clearTimeout(hideTimer);
@@ -458,11 +464,13 @@ export default function GamePage() {
       synth.speak(line);
     };
     if (synth.getVoices().length > 0) {
+      try { synth.resume(); } catch { /* some browsers expose a no-op resume */ }
       play();
       return;
     }
     const onVoicesChanged = () => {
       synth.removeEventListener("voiceschanged", onVoicesChanged);
+      try { synth.resume(); } catch { /* some browsers expose a no-op resume */ }
       play();
     };
     synth.addEventListener("voiceschanged", onVoicesChanged);
@@ -474,10 +482,10 @@ export default function GamePage() {
 
   useEffect(() => {
     if (!voiceOn || !soundPhase || !narrationText || !("speechSynthesis" in window)) return;
-    // Keep a phase line alive until it finishes. The server timer advances
-    // independently, but cutting the announcer mid-sentence breaks the case
-    // rhythm; the browser speech queue naturally chains the next phase.
-    speakLine(narrationText, false);
+    // A phase announcement is the director's hand-off. Cancel an older line
+    // before speaking the new one so browser-specific speech queues cannot
+    // overlap or make the current phase sound like it was cut in half.
+    speakLine(narrationText, true);
     return () => {
       speechGenerationRef.current += 1;
     };
@@ -840,7 +848,7 @@ export default function GamePage() {
   const toggleVoice = () => {
     const next = !voiceOn;
     setVoiceOn(next);
-    localStorage.setItem("black-midnight:voice", next ? "1" : "0");
+    localStorage.setItem(VOICE_PREF_KEY, next ? "1" : "0");
     if (!next) {
       speechGenerationRef.current += 1;
       if ("speechSynthesis" in window) window.speechSynthesis.cancel();
@@ -1264,8 +1272,8 @@ export default function GamePage() {
           <div className="action-bar">
             {game.phase === "lobby" && (
               <>
-                <div><b>{game.players.length}/{game.max_players}명 등록 · 사람 준비 {readyHumans}/{humanCount} · {game.pace === "quick" ? "퀵 약 12분" : "클래식 20분+"}</b><span>{unreadyPlayers.length ? `${unreadyPlayers.map((player) => player.n).slice(0, 3).join(", ")}님의 준비를 기다리는 중입니다.` : "역할 배정 준비가 끝났습니다."}</span></div>
-                {game.host === game.me.id && <div className="pace-switch"><button className={game.pace === "quick" ? "active" : ""} onClick={() => send({ t: "pace", pace: "quick" })}><TimerReset size={14} />퀵 · 약 12분</button><button className={game.pace === "classic" ? "active" : ""} onClick={() => send({ t: "pace", pace: "classic" })}>클래식 · 20분+</button></div>}
+                <div><b>{game.players.length}/{game.max_players}명 등록 · 사람 준비 {readyHumans}/{humanCount} · {game.pace === "quick" ? "퀵 약 25분" : "클래식 35분+"}</b><span>{unreadyPlayers.length ? `${unreadyPlayers.map((player) => player.n).slice(0, 3).join(", ")}님의 준비를 기다리는 중입니다.` : "역할 배정 준비가 끝났습니다."}</span></div>
+                {game.host === game.me.id && <div className="pace-switch"><button className={game.pace === "quick" ? "active" : ""} onClick={() => send({ t: "pace", pace: "quick" })}><TimerReset size={14} />퀵 · 약 25분</button><button className={game.pace === "classic" ? "active" : ""} onClick={() => send({ t: "pace", pace: "classic" })}>클래식 · 35분+</button></div>}
                 {game.host === game.me.id && <div className="bot-fill-switch"><Bot size={14} /><span>AI 인원</span>{[4, 6, 8].map((target) => <button key={target} className={game.players.length === target ? "active" : ""} onClick={() => send({ t: "fill_bots", target })}>{target}</button>)}</div>}
                 <button className="secondary-button" onClick={() => setInviteOpen(true)}><UserPlus size={17} />친구 초대</button>
                 {game.host !== game.me.id && <button className="secondary-button" onClick={() => send({ t: "ready" })}>{me?.ready ? <Check size={17} /> : <ShieldQuestion size={17} />}{me?.ready ? "준비 취소" : "준비하기"}</button>}
