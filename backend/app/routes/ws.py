@@ -133,6 +133,8 @@ async def game_socket(
                     error = arena.add_question(player.id, str(msg.get("text", "")))
                 case "claim":
                     error = arena.add_claim(player.id, str(msg.get("text", "")))
+                case "tip":
+                    error = arena.add_tip(player.id, str(msg.get("text", "")))
                 case "read":
                     error = arena.submit_read(
                         player.id,

@@ -150,6 +150,7 @@ export default function GamePage() {
   const [chatText, setChatText] = useState("");
   const [questionText, setQuestionText] = useState("");
   const [claimText, setClaimText] = useState("");
+  const [tipText, setTipText] = useState("");
   const [willText, setWillText] = useState("");
   const [notice, setNotice] = useState("");
   const [now, setNow] = useState(0);
@@ -202,6 +203,9 @@ export default function GamePage() {
   const roundEventCopy = game?.round_event?.copy ?? "";
   const roundEventSealed = game?.round_event?.sealed_pressure ?? false;
   const eventSpeechKey = game?.phase === "lobby" ? null : roundEventId;
+  const latestTipId = game?.phase === "day"
+    ? game.tips.filter((tip) => tip.round === game.round).at(-1)?.id ?? null
+    : null;
   const voiceCanSpeak = Boolean(game?.me.alive && (
     ["lobby", "day", "vote", "gameover"].includes(game.phase)
     || (game.phase === "defense" && game.me.id === game.accused_id)
@@ -481,6 +485,14 @@ export default function GamePage() {
   }, [eventSpeechKey, roundEventCopy, roundEventTitle, speakLine, voiceOn]);
 
   useEffect(() => {
+    if (!voiceOn || !latestTipId) return;
+    const timer = window.setTimeout(() => {
+      speakLine("익명 제보가 도착했습니다. 작성자는 공개되지 않습니다. 사건 기록에서 내용을 확인하세요.", false);
+    }, 260);
+    return () => window.clearTimeout(timer);
+  }, [latestTipId, speakLine, voiceOn]);
+
+  useEffect(() => {
     if (!joined || !room || !nick) return;
     receivedPhaseRef.current = null;
     const key = getPlayerKey(room);
@@ -505,6 +517,7 @@ export default function GamePage() {
             ...next,
             players: next.players.map((player) => ({ ...player, score: player.score ?? 0, voice: player.voice ?? false })),
             round_event: next.round_event ?? null,
+            tips: next.tips ?? [],
             pressure_counts: next.pressure_counts ?? {},
             pressure_progress: next.pressure_progress ?? { completed: 0, total: 0, sealed: false },
             awards: next.awards ?? [],
@@ -526,6 +539,7 @@ export default function GamePage() {
             me: {
               ...next.me,
               reads: next.me.reads ?? {},
+              can_tip: next.me.can_tip ?? false,
               can_leave_will: next.me.can_leave_will ?? false,
               private_lead: next.me.private_lead ?? null,
               ghost_prediction: next.me.ghost_prediction ?? null,
@@ -907,6 +921,14 @@ export default function GamePage() {
     setClaimText("");
   };
 
+  const submitTip = (event: FormEvent) => {
+    event.preventDefault();
+    const text = tipText.trim();
+    if (!text || !game?.me.can_tip) return;
+    if (!send({ t: "tip", text })) return;
+    setTipText("");
+  };
+
   const submitWill = (event: FormEvent) => {
     event.preventDefault();
     const text = willText.trim();
@@ -919,8 +941,9 @@ export default function GamePage() {
     if (!game) return;
     const roles = game.players.filter((player) => player.role).map((player) => `${player.n} — ${ROLE_META[player.role!].name} · ${player.score}점`).join("\n");
     const clues = game.clues.map((clue) => `${clue.code} ${clue.title} — ${clue.detail}`).join("\n");
+    const tips = game.tips.map((tip) => `DAY ${tip.round} · 익명 제보 — ${tip.text}`).join("\n");
     const history = game.case_log.map((line, index) => `${String(index + 1).padStart(2, "0")}  ${line}`).join("\n");
-    await navigator.clipboard.writeText(`[검은 자정 · ${room}]\n${roles}\n\n현장 단서\n${clues || "아직 확보된 단서 없음"}\n\n사건 기록\n${history}`);
+    await navigator.clipboard.writeText(`[검은 자정 · ${room}]\n${roles}\n\n현장 단서\n${clues || "아직 확보된 단서 없음"}\n\n익명 제보\n${tips || "도착한 익명 제보 없음"}\n\n사건 기록\n${history}`);
     setNotice("전체 사건 기록을 복사했습니다.");
   };
 
@@ -1155,6 +1178,21 @@ export default function GamePage() {
                   </div>
                 ) : <div className="interrogation-observer">사망자는 질문과 판단에 참여할 수 없지만 모든 진술을 열람할 수 있습니다.</div>}
               </div>
+            </section>
+          )}
+          {game.phase === "day" && (
+            <section className="anonymous-tip-panel" aria-label="익명 제보실">
+              <header>
+                <div><Radio size={16} /><span><b>익명 제보실</b><small>AUTHOR SEALED · 이번 낮 1회</small></span></div>
+                <em>{game.tips.filter((tip) => tip.round === game.round).length}건 봉인</em>
+              </header>
+              <p>출처는 공개되지 않습니다. 사실일 수도, 마피아가 흘린 함정일 수도 있습니다.</p>
+              <div className="anonymous-tip-feed">
+                {game.tips.filter((tip) => tip.round === game.round).length === 0
+                  ? <span>아직 도착한 익명 제보가 없습니다.</span>
+                  : game.tips.filter((tip) => tip.round === game.round).map((tip, index) => <article key={tip.id}><i>{String(index + 1).padStart(2, "0")}</i><b>익명 제보</b><span>{tip.text}</span></article>)}
+              </div>
+              {game.me.alive ? <form onSubmit={submitTip}><input value={tipText} onChange={(event) => setTipText(event.target.value)} maxLength={120} placeholder="사건 기록과 어긋나는 한 가지를 제보하세요" /><button disabled={!tipText.trim() || !game.me.can_tip}><LockKeyhole size={14} />{game.me.can_tip ? "제보 봉인" : "이미 봉인"}</button></form> : <small className="anonymous-tip-dead">사망자는 제보를 남길 수 없지만 도착한 내용을 열람할 수 있습니다.</small>}
             </section>
           )}
           {game.phase === "vote" && Object.keys(game.read_summary).length > 0 && (

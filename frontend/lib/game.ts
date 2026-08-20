@@ -30,12 +30,14 @@ export type PrivateLead = { id: string; title: string; detail: string; suspect_i
 export type PublicLead = { id: string; owner_id: string; owner: string; title: string; detail: string; round: number; suspect_id: string };
 export type RoundEvent = { id: string; title: string; tag: string; copy: string; sealed_pressure: boolean };
 export type CaseAward = { id: string; player_id: string; player: string; title: string; copy: string };
+export type AnonymousTip = { id: string; text: string; round: number; at: number };
 
 export type GameState = {
   t: "state";
   room: string;
   case_profile: CaseProfile;
   round_event: RoundEvent | null;
+  tips: AnonymousTip[];
   pressure_counts: Record<string, number>;
   pressure_progress: { completed: number; total: number; sealed: boolean };
   awards: CaseAward[];
@@ -58,6 +60,7 @@ export type GameState = {
     judgement?: boolean | null;
     intel: string[];
     mission: string;
+    can_tip: boolean;
     reads: Record<string, ReadStance>;
     can_leave_will: boolean;
     private_lead: PrivateLead | null;

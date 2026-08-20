@@ -214,6 +214,8 @@ class Room:
         self.reactions: deque[dict[str, str | int]] = deque(maxlen=20)
         self.questions: deque[dict[str, str | int]] = deque(maxlen=24)
         self.claims: deque[dict[str, str | int]] = deque(maxlen=36)
+        self.tips: deque[dict[str, str | int]] = deque(maxlen=18)
+        self.tip_marks: set[str] = set()
         self.moments: deque[dict[str, str | int | None]] = deque(maxlen=48)
         self.clues: deque[dict[str, Any]] = deque(maxlen=12)
         self.reads: dict[str, dict[str, str]] = {}
@@ -585,6 +587,8 @@ class Room:
         self.reactions.clear()
         self.questions.clear()
         self.claims.clear()
+        self.tips.clear()
+        self.tip_marks.clear()
         self.moments.clear()
         self.clues.clear()
         self.private_leads.clear()
@@ -634,6 +638,8 @@ class Room:
         self.reactions.clear()
         self.questions.clear()
         self.claims.clear()
+        self.tips.clear()
+        self.tip_marks.clear()
         self.moments.clear()
         self.clues.clear()
         self.private_leads.clear()
@@ -778,6 +784,30 @@ class Room:
         })
         self.case_log.append(line)
         self._moment("claim", line, actor=pid)
+        return None
+
+    def add_tip(self, pid: str, raw: str) -> str | None:
+        """Seal one anonymous lead per living player during each daytime round."""
+        author = self.players.get(pid)
+        text = " ".join(raw.strip().split())[:120]
+        if self.phase != "day" or not author or not author.alive:
+            return "낮 토론 중인 생존자만 익명 제보를 남길 수 있습니다."
+        if not text:
+            return "제보 내용을 한 문장으로 작성해 주세요."
+        key = f"{self.round}:{pid}"
+        if key in self.tip_marks:
+            return "이번 낮의 익명 제보는 이미 봉인했습니다."
+        self.tip_marks.add(key)
+        self.tips.append({
+            "id": secrets.token_hex(4),
+            "text": text,
+            "round": self.round,
+            "at": int(time.time() * 1000),
+        })
+        # Never write the author into the public case log. The point of this
+        # channel is to create a useful lead whose credibility must be debated.
+        self._record("익명 제보가 사건 파일에 봉인되었습니다.")
+        self._moment("tip", "익명 제보가 사건 파일에 봉인되었습니다.")
         return None
 
     def leave_will(self, pid: str, raw: str) -> str | None:
@@ -1135,6 +1165,11 @@ class Room:
                     line = self._bot_line(bot, target) if target else random.choice(BOT_LINES)
                     self.chat.append({"id": secrets.token_hex(4), "from": bot.nick, "from_id": bot.id, "text": line,
                                       "visibility": "all", "at": int(time.time() * 1000)})
+                    if target and random.random() < 0.42:
+                        self.add_tip(
+                            bot.id,
+                            f"{target.nick}님의 발언과 사건 기록의 시간대가 맞는지 다시 확인해 보세요.",
+                        )
                     if not any(item["round"] == self.round and item["speaker_id"] == bot.id for item in self.claims):
                         claim = f"제 판단은 {target.nick}님을 우선 확인해야 한다는 것입니다." if target else line
                         self.claims.append({
@@ -1386,7 +1421,9 @@ class Room:
             speaker = self.players.get(self.speaker_id or "")
             if speaker:
                 event = self.round_event["title"] if self.round_event else "자정 사건"
-                return f"{event} 적용 중. 현재 {speaker.nick}님이 집중 발언자입니다. 질문을 듣고 이번 낮 한 번뿐인 긴급 지목을 신중하게 사용하세요."
+                can_tip = f"{self.round}:{viewer.id}" not in self.tip_marks
+                tip_hint = " 익명 제보실에서 출처 없는 단서를 한 번 봉인할 수 있습니다." if can_tip else " 익명 제보는 이미 봉인했습니다."
+                return f"{event} 적용 중. 현재 {speaker.nick}님이 집중 발언자입니다. 질문을 듣고 이번 낮 한 번뿐인 긴급 지목을 신중하게 사용하세요.{tip_hint}"
             if viewer.intel:
                 return f"최근 조사 기록: {viewer.intel[-1]} 공개할지, 한 턴 더 숨길지 판단하세요."
             return "한 사람을 몰아가기보다 각자 ‘어젯밤 누구를 선택했는지’ 물어보면 모순을 찾기 쉽습니다."
@@ -1478,6 +1515,7 @@ class Room:
             },
             "awards": list(self.awards) if self.phase == "gameover" else [],
             "public_leads": list(self.public_leads),
+            "tips": list(self.tips)[-12:],
             "phase": self.phase,
             "round": self.round,
             "deadline": round(self.deadline * 1000),
@@ -1514,6 +1552,10 @@ class Room:
                 "judgement": self.judgements.get(viewer.id),
                 "intel": viewer.intel[-4:],
                 "mission": viewer.mission,
+                "can_tip": (
+                    self.phase == "day" and viewer.alive
+                    and f"{self.round}:{viewer.id}" not in self.tip_marks
+                ),
                 "reads": current_reads,
                 "can_leave_will": (
                     self.phase == "dawn" and viewer.id == self.last_death_id

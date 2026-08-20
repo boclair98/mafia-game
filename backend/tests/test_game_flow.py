@@ -283,6 +283,23 @@ def test_day_discussion_allows_every_living_player_to_talk_while_spotlight_rotat
     assert "사망자" in room.add_chat("p4", "유령 발언")
 
 
+def test_anonymous_tip_is_one_per_player_per_day_and_never_exposes_author():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.round = 1
+    room.phase = "day"
+
+    assert room.add_tip("p2", "사건 시각과 출입 기록이 맞지 않습니다") is None
+    assert "이미 봉인" in room.add_tip("p2", "두 번째 제보")
+    assert room.tips[-1]["text"] == "사건 시각과 출입 기록이 맞지 않습니다"
+    state = room._state_for(room.players["p1"])
+    assert state["tips"][-1]["text"] == "사건 시각과 출입 기록이 맞지 않습니다"
+    assert "from" not in state["tips"][-1]
+    assert state["me"]["can_tip"] is True
+
+    room.players["p3"].alive = False
+    assert "생존자" in room.add_tip("p3", "유령 제보")
+
+
 def test_ballot_feed_stays_sealed_until_trial_and_persists_through_result():
     room = room_with("mafia", "doctor", "detective", "citizen")
     room.phase = "vote"
