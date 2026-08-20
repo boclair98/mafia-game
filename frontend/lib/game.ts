@@ -41,6 +41,7 @@ export type GameState = {
   awards: CaseAward[];
   phase: Phase;
   round: number;
+  mode?: "solo" | "party";
   deadline: number;
   winner: "mafia" | "citizen" | "trickster" | null;
   pace: "quick" | "classic";

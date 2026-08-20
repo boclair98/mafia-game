@@ -203,6 +203,7 @@ class Room:
         self.deadline = 0.0
         self.phase_started_at = time.time()
         self.winner: str | None = None
+        self.mode = "party"
         self.actions: dict[str, str] = {}
         self.votes: dict[str, str] = {}
         self.accused_id: str | None = None
@@ -553,6 +554,7 @@ class Room:
 
         # Disconnected lobby seats never enter the game.
         self.players = {p.id: p for p in active}
+        self.mode = "solo" if sum(not p.is_bot for p in active) == 1 else "party"
         mafia_count = 2 if len(active) >= 7 else 1
         roles = ["mafia"] * mafia_count + ["doctor", "detective"]
         if len(active) >= 6:
@@ -600,6 +602,8 @@ class Room:
         self.last_death_id = None
         self._record(f"사건 {self.case_profile['code']} · {self.case_profile['title']}. 현장이 봉쇄되었습니다.")
         self._record(self.case_profile["briefing"])
+        if self.mode == "solo":
+            self._record("혼자 수사 모드 — AI 용의자 7명이 각자의 기억과 의심을 들고 앉았습니다.")
         self._draw_round_event()
         self._deal_private_leads(active)
         self._bot_marks.clear()
@@ -619,6 +623,7 @@ class Room:
             player.mission = ""
         self.round = 0
         self.winner = None
+        self.mode = "party"
         self.actions.clear()
         self.votes.clear()
         self.accused_id = None
@@ -1477,6 +1482,7 @@ class Room:
             "round": self.round,
             "deadline": round(self.deadline * 1000),
             "winner": self.winner,
+            "mode": self.mode,
             "pace": self.pace,
             "host": self.host_id,
             "min_players": MIN_PLAYERS,

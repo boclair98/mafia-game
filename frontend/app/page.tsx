@@ -1040,7 +1040,7 @@ export default function GamePage() {
       <section className="phase-banner">
         <div className="scene-vignette" aria-hidden="true"><i /><span /></div>
         <div className="threat-monitor"><div><Siren size={14} /><span>CITY THREAT</span><b>{cityThreat}%</b></div><div className="threat-bar"><i style={{ width: `${cityThreat}%` }} /></div><small>{aliveCount} ALIVE · {lostCount} LOST</small></div>
-        <div className="phase-kicker">{game.case_profile.code} · {game.case_profile.location} · {game.round ? `DAY ${game.round}` : "WAITING ROOM"}</div>
+        <div className="phase-kicker">{game.mode === "solo" ? "SOLO CASE · " : ""}{game.case_profile.code} · {game.case_profile.location} · {game.round ? `DAY ${game.round}` : "WAITING ROOM"}</div>
         <h1>{phase[0]}</h1>
         <p><b>{game.case_profile.title}</b><span>{phase[1]}</span></p>
         <div className="phase-now" aria-live="polite"><i /><b>{PHASE_ALERT_META[game.phase].title}</b><span>{remaining > 0 ? `${remaining}초 남음` : game.phase === "lobby" ? "시작 대기 중" : "진행 중"}</span></div>
@@ -1218,7 +1218,7 @@ function NarrativeSceneCard({ game, narrative, chapter, narrativeLine }: { game:
   const ending = game.phase === "gameover" ? getEndingLine(game) : null;
   return (
     <section className={`narrative-scene-card narrative-scene-${chapter.id}`} aria-label="현재 사건 장면">
-      <div className="narrative-scene-top"><span>{chapter.label}</span><small>{narrative.codename} · {String(chapterIndex + 1).padStart(2, "0")} / {String(narrative.chapters.length).padStart(2, "0")}</small></div>
+      <div className="narrative-scene-top"><span>{game.mode === "solo" ? "SOLO CASE · " : ""}{chapter.label}</span><small>{narrative.codename} · {String(chapterIndex + 1).padStart(2, "0")} / {String(narrative.chapters.length).padStart(2, "0")}</small></div>
       <div className="narrative-scene-copy"><b>{game.phase === "gameover" ? "사건의 마지막 문장" : chapter.title}</b><p>{game.phase === "gameover" ? getEndingLine(game) : narrativeLine}</p></div>
       <div className="narrative-scene-steps" aria-label="사건 챕터 진행">
         {narrative.chapters.map((item, index) => <i key={item.id} className={index < chapterIndex ? "done" : index === chapterIndex ? "active" : ""} title={item.label} />)}

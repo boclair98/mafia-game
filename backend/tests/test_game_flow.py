@@ -146,6 +146,7 @@ def test_solo_start_builds_a_full_case_with_distinct_ai_personas():
     assert len(bots) == 7
     assert len({participant.bot_profile for participant in bots}) == 7
     state = room._state_for(room.players["p1"])
+    assert state["mode"] == "solo"
     assert all(player["bot_persona"] for player in state["players"] if player["bot"])
     assert all(player["role"] is None for player in state["players"])
 
