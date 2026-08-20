@@ -6,7 +6,7 @@ import {
   Settings, Share2, ShieldCheck, ShieldQuestion, Skull, Smartphone, Sparkles,
   TimerReset, Trophy, UserPlus, Users, Volume2, Vote, X,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { GameState, PlayerState, Role, WelcomeMsg } from "@/lib/game";
 import { fetchGameStatus, fetchLeaderboard, type GameStatus, type LeaderboardEntry } from "@/lib/api";
@@ -76,7 +76,13 @@ function phaseNarration(game: GameState, phase: GameState["phase"]) {
   const latest = game.story.at(-1);
   const accused = game.players.find((player) => player.id === game.accused_id);
   if (phase === "gameover") return getEndingLine(game);
-  if ((phase === "dawn" || phase === "result") && latest) return latest;
+  if (phase === "reveal") {
+    const role = ROLE_META[game.me.role];
+    return `사건이 시작되었습니다. 당신은 ${role.name}입니다. ${role.goal}. ${role.power}.`;
+  }
+  if ((phase === "dawn" || phase === "result") && latest) {
+    return phase === "dawn" ? `새벽 사건 보고입니다. ${latest}` : `판결 결과입니다. ${latest}`;
+  }
   if (phase === "defense" && accused) return `${accused.n}님의 최후 변론을 시작합니다.`;
   return getNarrativeLine({ ...game, phase }) || PHASE_NARRATION[phase];
 }
@@ -161,10 +167,10 @@ export default function GamePage() {
   const [rankingOpen, setRankingOpen] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [networkStatus, setNetworkStatus] = useState<GameStatus | null>(null);
-  const [voiceOn, setVoiceOn] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(true);
   const [voiceChatOn, setVoiceChatOn] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
-  const [soundOn, setSoundOn] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [legalPage, setLegalPage] = useState<LegalPage | null>(null);
@@ -186,6 +192,7 @@ export default function GamePage() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const voiceRoomRef = useRef<VoiceRoom | null>(null);
   const lastCountdownBeep = useRef<number | null>(null);
+  const speechGenerationRef = useRef(0);
   const soundPhase = game?.phase;
   const countdownRemaining = game ? secondsLeft(game.deadline, now) : 0;
   const narrationText = game && soundPhase ? phaseNarration(game, soundPhase) : "";
@@ -194,6 +201,7 @@ export default function GamePage() {
   const roundEventTag = game?.round_event?.tag ?? "";
   const roundEventCopy = game?.round_event?.copy ?? "";
   const roundEventSealed = game?.round_event?.sealed_pressure ?? false;
+  const eventSpeechKey = game?.phase === "lobby" ? null : roundEventId;
   const voiceCanSpeak = Boolean(game?.me.alive && (
     ["lobby", "day", "vote", "gameover"].includes(game.phase)
     || (game.phase === "defense" && game.me.id === game.accused_id)
@@ -214,8 +222,10 @@ export default function GamePage() {
       if (savedStats) {
         try { setStats(JSON.parse(savedStats) as LocalStats); } catch { localStorage.removeItem("black-midnight:stats"); }
       }
-      setVoiceOn(localStorage.getItem("black-midnight:voice") === "1");
-      setSoundOn(localStorage.getItem("black-midnight:sound") === "1");
+      // Audio is part of the core case experience by default. A saved "0"
+      // remains an explicit opt-out for players who need a silent session.
+      setVoiceOn(localStorage.getItem("black-midnight:voice") !== "0");
+      setSoundOn(localStorage.getItem("black-midnight:sound") !== "0");
       setTermsAccepted(localStorage.getItem("black-midnight:terms-v1") === "1");
       try { setBlockedPlayers(JSON.parse(localStorage.getItem("black-midnight:blocked") || "[]") as string[]); } catch { localStorage.removeItem("black-midnight:blocked"); }
     });
@@ -414,21 +424,59 @@ export default function GamePage() {
     return () => window.clearInterval(timer);
   }, [tutorialOpen]);
 
+  const speakLine = useCallback((text: string, interrupt = true) => {
+    if (!voiceOn || !text.trim() || !("speechSynthesis" in window)) return;
+    const synth = window.speechSynthesis;
+    const generation = speechGenerationRef.current + 1;
+    speechGenerationRef.current = generation;
+    if (interrupt) synth.cancel();
+    let spoken = false;
+    const play = () => {
+      if (spoken || generation !== speechGenerationRef.current) return;
+      spoken = true;
+      const line = new SpeechSynthesisUtterance(text.trim());
+      const koreanVoices = synth.getVoices().filter((voice) => voice.lang.toLowerCase().startsWith("ko"));
+      line.voice = koreanVoices.find((voice) => /(injoon|hyunsu|male|남성|natural|neural)/i.test(voice.name))
+        ?? koreanVoices.find((voice) => /(google|microsoft|apple)/i.test(voice.name))
+        ?? koreanVoices[0]
+        ?? null;
+      line.lang = "ko-KR";
+      line.rate = 0.88;
+      line.pitch = 0.78;
+      line.volume = 0.96;
+      synth.speak(line);
+    };
+    if (synth.getVoices().length > 0) {
+      play();
+      return;
+    }
+    const onVoicesChanged = () => {
+      synth.removeEventListener("voiceschanged", onVoicesChanged);
+      play();
+    };
+    synth.addEventListener("voiceschanged", onVoicesChanged);
+    window.setTimeout(() => {
+      synth.removeEventListener("voiceschanged", onVoicesChanged);
+      play();
+    }, 300);
+  }, [voiceOn]);
+
   useEffect(() => {
     if (!voiceOn || !soundPhase || !narrationText || !("speechSynthesis" in window)) return;
-    const line = new SpeechSynthesisUtterance(narrationText);
-    const voices = window.speechSynthesis.getVoices();
-    const koreanVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith("ko"));
-    line.voice = koreanVoices.find((voice) => /(injoon|hyunsu|male|남성|natural|neural)/i.test(voice.name))
-      ?? koreanVoices.find((voice) => /(google|microsoft|apple)/i.test(voice.name))
-      ?? koreanVoices[0]
-      ?? null;
-    line.lang = "ko-KR";
-    line.rate = 0.9;
-    line.pitch = 0.72;
-    line.volume = 0.92;
-    window.speechSynthesis.speak(line);
-  }, [narrationText, soundPhase, voiceOn]);
+    speakLine(narrationText, true);
+    return () => {
+      speechGenerationRef.current += 1;
+      window.speechSynthesis.cancel();
+    };
+  }, [narrationText, soundPhase, speakLine, voiceOn]);
+
+  useEffect(() => {
+    if (!voiceOn || !eventSpeechKey || !roundEventTitle || !roundEventCopy) return;
+    const timer = window.setTimeout(() => {
+      speakLine(`자정 사건 카드. ${roundEventTitle}. ${roundEventCopy}`, false);
+    }, 3600);
+    return () => window.clearTimeout(timer);
+  }, [eventSpeechKey, roundEventCopy, roundEventTitle, speakLine, voiceOn]);
 
   useEffect(() => {
     if (!joined || !room || !nick) return;
@@ -813,6 +861,9 @@ export default function GamePage() {
     if (!send({ t: kind, target: selectedPlayer.id })) return;
     const label = kind === "vote" ? "투표 봉인 완료" : `${refinedActionCopy} 선택 완료`;
     setDecisionFlash({ label, target: selectedPlayer.n });
+    speakLine(kind === "vote"
+      ? `${selectedPlayer.n}님에게 투표를 봉인했습니다.`
+      : `${selectedPlayer.n}님을 대상으로 ${refinedActionCopy}을 봉인했습니다.`, false);
     if (decisionFlashTimer.current) window.clearTimeout(decisionFlashTimer.current);
     decisionFlashTimer.current = window.setTimeout(() => setDecisionFlash(null), 2600);
     if ("vibrate" in navigator) navigator.vibrate(kind === "vote" ? [45, 30, 90] : 60);
@@ -821,6 +872,7 @@ export default function GamePage() {
   const commitJudgement = (execute: boolean) => {
     if (!send({ t: "judge", execute })) return;
     setDecisionFlash({ label: execute ? "처형 판결 봉인" : "석방 판결 봉인", target: accusedPlayer?.n ?? "피고" });
+    speakLine(`${accusedPlayer?.n ?? "피고"}님을 ${execute ? "처형하는" : "석방하는"} 판결로 봉인했습니다.`, false);
     if (decisionFlashTimer.current) window.clearTimeout(decisionFlashTimer.current);
     decisionFlashTimer.current = window.setTimeout(() => setDecisionFlash(null), 2600);
     if ("vibrate" in navigator) navigator.vibrate(execute ? [45, 30, 90] : 55);
