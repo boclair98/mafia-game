@@ -463,10 +463,12 @@ export default function GamePage() {
 
   useEffect(() => {
     if (!voiceOn || !soundPhase || !narrationText || !("speechSynthesis" in window)) return;
-    speakLine(narrationText, true);
+    // Keep a phase line alive until it finishes. The server timer advances
+    // independently, but cutting the announcer mid-sentence breaks the case
+    // rhythm; the browser speech queue naturally chains the next phase.
+    speakLine(narrationText, false);
     return () => {
       speechGenerationRef.current += 1;
-      window.speechSynthesis.cancel();
     };
   }, [narrationText, soundPhase, speakLine, voiceOn]);
 
@@ -800,7 +802,10 @@ export default function GamePage() {
     const next = !voiceOn;
     setVoiceOn(next);
     localStorage.setItem("black-midnight:voice", next ? "1" : "0");
-    if (!next && "speechSynthesis" in window) window.speechSynthesis.cancel();
+    if (!next) {
+      speechGenerationRef.current += 1;
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    }
   };
 
   const toggleVoiceChat = async () => {
