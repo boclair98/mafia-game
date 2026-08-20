@@ -11,6 +11,8 @@ export type PlayerState = {
   mafia: boolean;
   role: Role | null;
   bot: boolean;
+  bot_profile?: string | null;
+  bot_persona?: string | null;
   score: number;
   voice: boolean;
 };

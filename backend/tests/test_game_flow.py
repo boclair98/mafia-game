@@ -136,6 +136,20 @@ def test_bots_are_playable_seats_but_not_live_human_connections():
     assert room.phase == "reveal"
 
 
+def test_solo_start_builds_a_full_case_with_distinct_ai_personas():
+    room = room_with("citizen")
+
+    assert room.solo_start("p1") is None
+    assert room.phase == "reveal"
+    assert len(room.players) == 8
+    bots = [participant for participant in room.players.values() if participant.is_bot]
+    assert len(bots) == 7
+    assert len({participant.bot_profile for participant in bots}) == 7
+    state = room._state_for(room.players["p1"])
+    assert all(player["bot_persona"] for player in state["players"] if player["bot"])
+    assert all(player["role"] is None for player in state["players"])
+
+
 def test_reactions_are_phase_limited_whitelisted_and_rate_limited():
     room = room_with("citizen", "citizen", "citizen", "citizen")
     room.phase = "day"

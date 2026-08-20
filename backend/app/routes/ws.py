@@ -89,6 +89,8 @@ async def game_socket(
                     except (TypeError, ValueError):
                         target = 6
                     error = arena.fill_bots(player.id, target)
+                case "solo_start":
+                    error = arena.solo_start(player.id)
                 case "remove_seat":
                     error = arena.remove_lobby_seat(player.id, str(msg.get("target", "")))
                 case "start":

@@ -49,6 +49,26 @@ ROLE_NAMES = {
 }
 
 BOT_NAMES = ["루나", "검은고양이", "제로", "모카", "백야", "도윤", "비비", "하울"]
+BOT_PERSONAS = {
+    "루나": {"id": "analyst", "label": "기록 분석가", "talk_chance": 0.72, "suspect_bias": 0.18,
+             "lines": ["사건 기록의 시간 순서를 다시 맞춰볼게요.", "숫자와 동선이 어긋나는 사람부터 확인하죠."]},
+    "검은고양이": {"id": "provocateur", "label": "도발적인 심문관", "talk_chance": 0.86, "suspect_bias": 0.32,
+                  "lines": ["다들 너무 안전한 말만 하네요. 한 명은 지금 숨기고 있어요.", "좋아요, 그럼 가장 불편한 질문부터 하겠습니다."]},
+    "제로": {"id": "skeptic", "label": "냉정한 회의론자", "talk_chance": 0.58, "suspect_bias": 0.05,
+             "lines": ["확신보다 확인 가능한 사실을 먼저 보죠.", "아직은 보류입니다. 다음 기록이 더 필요해요."]},
+    "모카": {"id": "empath", "label": "알리바이 중재자", "talk_chance": 0.68, "suspect_bias": -0.08,
+             "lines": ["서로의 말을 끝까지 듣고 판단했으면 해요.", "지금 몰아가면 진짜 단서를 놓칠 수 있어요."]},
+    "백야": {"id": "archivist", "label": "침묵하는 기록관", "talk_chance": 0.46, "suspect_bias": 0.12,
+             "lines": ["저는 발언보다 행동의 순서를 기록하고 있습니다.", "방금 말과 어젯밤 선택이 맞는지 비교해 보세요."]},
+    "도윤": {"id": "captain", "label": "결단 빠른 현장대장", "talk_chance": 0.78, "suspect_bias": 0.25,
+             "lines": ["시간이 없습니다. 지금 가장 모순된 한 명을 좁혀야 해요.", "제 판단은 바뀔 수 있지만, 근거 없이 표를 흩뜨리진 맙시다."]},
+    "비비": {"id": "observer", "label": "감정적인 목격자", "talk_chance": 0.74, "suspect_bias": 0.2,
+             "lines": ["말투가 조금 이상했어요. 그 부분을 그냥 넘기면 안 돼요.", "저는 방금 반응이 가장 신경 쓰입니다."]},
+    "하울": {"id": "maverick", "label": "독단적인 승부사", "talk_chance": 0.9, "suspect_bias": 0.4,
+             "lines": ["저는 한 명을 찍고 끝까지 검증하겠습니다.", "모두가 보류하면 범인만 편해집니다."]},
+}
+DEFAULT_BOT_PERSONA = {"id": "balanced", "label": "균형 잡힌 수사관", "talk_chance": 0.65, "suspect_bias": 0.12,
+                       "lines": ["기록과 발언을 함께 비교해 보죠."]}
 BOT_LINES = [
     "첫날 정보 있는 사람부터 말해봐요.",
     "말이 너무 빠른 사람도 조금 의심스럽네요.",
@@ -165,6 +185,7 @@ class Player:
     intel: list[str] = field(default_factory=list)
     score: int = 0
     is_bot: bool = False
+    bot_profile: str = "balanced"
     mission: str = ""
     last_chat_at: float = 0.0
     last_reaction_at: float = 0.0
@@ -481,10 +502,24 @@ class Room:
             bot = Player(
                 id=secrets.token_urlsafe(6), key=f"bot-{secrets.token_urlsafe(10)}",
                 nick=name, coders_id=None, ws=None, connected=False, ready=True, is_bot=True,
+                bot_profile=BOT_PERSONAS.get(name, DEFAULT_BOT_PERSONA)["id"],
             )
             self.players[bot.id] = bot
-            self._record(f"AI 플레이어 {bot.nick}님이 참가했습니다.")
+            persona = BOT_PERSONAS.get(name, DEFAULT_BOT_PERSONA)
+            self._record(f"AI 플레이어 {bot.nick}님이 참가했습니다. · {persona['label']}")
         return None
+
+    def solo_start(self, pid: str) -> str | None:
+        """Start a complete story match for a lone player in one command."""
+        if self.phase != "lobby" or pid != self.host_id:
+            return "혼자 수사 모드는 대기실 방장만 시작할 수 있습니다."
+        if len(self.connected_players) != 1:
+            return "친구가 함께 있는 방에서는 일반 게임 시작을 사용해 주세요."
+        error = self.fill_bots(pid, min(MAX_PLAYERS, 8))
+        if error:
+            return error
+        self._record("혼자 수사 모드 — AI 용의자 7명이 사건 파일에 등록되었습니다.")
+        return self.start(pid)
 
     def remove_lobby_seat(self, pid: str, target_id: str) -> str | None:
         if self.phase != "lobby" or pid != self.host_id:
@@ -1002,13 +1037,56 @@ class Room:
         self.case_log.append(f"{speaker.nick}님의 공개 심문이 시작되었습니다.")
         key = f"{self.round}:{speaker.id}"
         for bot in (p for p in self.players.values() if p.is_bot and p.alive and p.id != speaker.id):
+            persona = self._bot_persona(bot)
             if bot.role == "mafia" and speaker.role == "mafia":
                 stance = "trust"
-            elif speaker.role == "mafia" and random.random() < 0.68:
+            elif speaker.role == "mafia" and random.random() < min(0.92, 0.65 + persona["suspect_bias"]):
+                stance = "suspect"
+            elif speaker.id in self._bot_suspicions.values() and random.random() < 0.8:
                 stance = "suspect"
             else:
-                stance = random.choice(["trust", "hold", "hold", "suspect"])
+                stance = random.choices(
+                    ["trust", "hold", "suspect"],
+                    weights=[max(1, 3 - int(persona["suspect_bias"] * 4)), 4, max(1, 2 + int(persona["suspect_bias"] * 4))],
+                    k=1,
+                )[0]
             self.reads.setdefault(bot.id, {})[key] = stance
+
+    def _bot_persona(self, bot: Player) -> dict[str, Any]:
+        for persona in BOT_PERSONAS.values():
+            if persona["id"] == bot.bot_profile:
+                return persona
+        return DEFAULT_BOT_PERSONA
+
+    def _bot_target_score(self, bot: Player, target: Player) -> float:
+        """Score public evidence so bot votes feel reasoned instead of random."""
+        persona = self._bot_persona(bot)
+        score = random.uniform(-0.35, 0.35) + float(persona["suspect_bias"])
+        if self._bot_suspicions.get(bot.id) == target.id:
+            score += 3.2
+        if any(target.id in clue.get("suspect_ids", []) for clue in list(self.clues)[-3:]):
+            score += 0.65
+        if any(lead.get("suspect_id") == target.id for lead in list(self.public_leads)[-4:]):
+            score += 0.45
+        if any(target.id == marked for marked in self.pressure_marks.values()):
+            score += 0.35
+        if target.id == self.speaker_id:
+            score += 0.18
+        if bot.role == "mafia" and target.role != "mafia":
+            score += random.uniform(0.05, 0.4)
+        return score
+
+    def _bot_choose_target(self, bot: Player, candidates: list[Player]) -> Player | None:
+        if not candidates:
+            return None
+        return max(candidates, key=lambda target: self._bot_target_score(bot, target))
+
+    def _bot_line(self, bot: Player, target: Player | None) -> str:
+        persona = self._bot_persona(bot)
+        line = random.choice(persona["lines"])
+        if target and random.random() < 0.72:
+            return f"{line} {target.nick}님, 이 부분부터 설명해 주세요."
+        return line
 
     def _run_bots(self) -> None:
         bots = [p for p in self.players.values() if p.is_bot and p.alive]
@@ -1032,29 +1110,24 @@ class Room:
                     if bot.role == "mafia":
                         pressure_targets = [p for p in pressure_targets if p.role != "mafia"]
                     preferred = self.players.get(self._bot_suspicions.get(bot.id, ""))
-                    target = (
-                        preferred if preferred in pressure_targets
-                        else random.choice(pressure_targets) if pressure_targets else None
-                    )
+                    target = preferred if preferred in pressure_targets else self._bot_choose_target(bot, pressure_targets)
                     if target:
                         self.apply_pressure(bot.id, target.id)
                 if bot.id != self.speaker_id:
                     continue
                 mark = f"day:{self.round}:{bot.id}"
-                if mark not in self._bot_marks and random.random() < 0.22:
+                persona = self._bot_persona(bot)
+                if mark not in self._bot_marks and random.random() < persona["talk_chance"]:
                     self._bot_marks.add(mark)
                     candidates = [p for p in alive if p.id != bot.id]
                     if bot.role == "mafia":
                         candidates = [p for p in candidates if p.role != "mafia"]
                     target = self.players.get(self._bot_suspicions.get(bot.id, ""))
                     if not target or not target.alive:
-                        target = random.choice(candidates) if candidates else None
+                        target = self._bot_choose_target(bot, candidates)
                     if target:
                         self._bot_suspicions[bot.id] = target.id
-                    line = (
-                        random.choice(BOT_QUESTIONS).format(target=target.nick)
-                        if target else random.choice(BOT_LINES)
-                    )
+                    line = self._bot_line(bot, target) if target else random.choice(BOT_LINES)
                     self.chat.append({"id": secrets.token_hex(4), "from": bot.nick, "from_id": bot.id, "text": line,
                                       "visibility": "all", "at": int(time.time() * 1000)})
                     if not any(item["round"] == self.round and item["speaker_id"] == bot.id for item in self.claims):
@@ -1075,9 +1148,9 @@ class Room:
                         targets = [p for p in targets if p.role != "mafia"]
                     if targets:
                         preferred = self.players.get(self._bot_suspicions.get(bot.id, ""))
-                        self.votes[bot.id] = (
-                            preferred.id if preferred in targets else random.choice(targets).id
-                        )
+                        target = preferred if preferred in targets else self._bot_choose_target(bot, targets)
+                        if target:
+                            self.votes[bot.id] = target.id
         elif self.phase == "defense" and self.accused_id:
             accused = self.players.get(self.accused_id)
             if accused and accused.is_bot:
@@ -1419,6 +1492,8 @@ class Room:
                     "mafia": p.id in mafia_team,
                     "role": p.role if self.phase == "gameover" else None,
                     "bot": p.is_bot,
+                    "bot_profile": p.bot_profile if p.is_bot else None,
+                    "bot_persona": self._bot_persona(p)["label"] if p.is_bot else None,
                     "score": p.score,
                     "voice": p.voice and p.connected and not p.is_bot,
                 }
