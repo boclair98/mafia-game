@@ -11,6 +11,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { GameState, PlayerState, Role, WelcomeMsg } from "@/lib/game";
 import { fetchGameStatus, fetchLeaderboard, type GameStatus, type LeaderboardEntry } from "@/lib/api";
 import { signInHref, useMe } from "@/lib/identity";
+import { getActiveChapter, getCaseNarrative, getEndingLine, getNarrativeLine, type CaseNarrative } from "@/lib/narrative";
 import { VoiceRoom, type VoiceSignal } from "@/lib/voice";
 import { type ConnStatus, GameSocket, gameSocketUrl } from "@/lib/ws";
 
@@ -74,9 +75,10 @@ const PHASE_NARRATION: Record<GameState["phase"], string> = {
 function phaseNarration(game: GameState, phase: GameState["phase"]) {
   const latest = game.story.at(-1);
   const accused = game.players.find((player) => player.id === game.accused_id);
-  if ((phase === "dawn" || phase === "result" || phase === "gameover") && latest) return latest;
+  if (phase === "gameover") return getEndingLine(game);
+  if ((phase === "dawn" || phase === "result") && latest) return latest;
   if (phase === "defense" && accused) return `${accused.n}님의 최후 변론을 시작합니다.`;
-  return PHASE_NARRATION[phase];
+  return getNarrativeLine({ ...game, phase }) || PHASE_NARRATION[phase];
 }
 
 const PHASE_TRACK: GameState["phase"][] = ["reveal", "night", "dawn", "day", "vote", "defense", "verdict", "result"];
@@ -591,6 +593,9 @@ export default function GamePage() {
   const alertMeta = phaseAlert ? PHASE_ALERT_META[phaseAlert] : null;
   const PhaseAlertIcon = alertMeta?.icon ?? Moon;
   const phaseProgressIndex = game?.phase === "gameover" ? PHASE_TRACK.length : game ? PHASE_TRACK.indexOf(game.phase) : -1;
+  const caseNarrative: CaseNarrative | null = game ? getCaseNarrative(game.case_profile.id) : null;
+  const activeChapter = game ? getActiveChapter(game) : null;
+  const narrativeLine = game ? getNarrativeLine(game) : "";
   const selectedPlayer = game?.players.find((player) => player.id === selected) ?? null;
   const selectedPlayerIndex = selectedPlayer && game ? game.players.findIndex((player) => player.id === selectedPlayer.id) : 0;
   const urgencyBoost = remaining > 0 && remaining <= 10 ? (10 - remaining) * 2 : 0;
@@ -990,6 +995,7 @@ export default function GamePage() {
             <div className="phase-alert-icon"><PhaseAlertIcon size={30} /></div>
             <h2>{alertMeta.title}</h2>
             <p>{alertMeta.copy}</p>
+            {caseNarrative && activeChapter && <div className="phase-alert-scene"><span>{caseNarrative.codename} · {activeChapter.label}</span><b>{activeChapter.title}</b><p>{narrativeLine}</p></div>}
             {voiceOn && <div className="phase-alert-voice"><Volume2 size={13} /><span>{phaseNarration(game, phaseAlert)}</span></div>}
             {remaining > 0 && <div className="phase-alert-countdown"><b>{remaining}</b><span>초 남음</span></div>}
             <div className="phase-alert-line"><i /></div>
@@ -1052,6 +1058,7 @@ export default function GamePage() {
 
         <section className="table-panel">
           <div className="panel-heading"><div><span>{game.phase === "lobby" ? "SUSPECT FILES" : "THE TABLE"}</span><h2>{game.phase === "lobby" ? "용의자 명단" : "참가자"}</h2></div><div>{game.players.filter((p) => p.alive).length} 생존</div></div>
+          {caseNarrative && activeChapter && <NarrativeSceneCard game={game} narrative={caseNarrative} chapter={activeChapter} narrativeLine={narrativeLine} />}
           {game.round_event && game.phase !== "lobby" && (
             <section className={`round-event-card event-${game.round_event.id}`}>
               <div><Sparkles size={17} /><span><small>{game.round_event.tag} · DAY {game.round}</small><b>{game.round_event.title}</b></span></div>
@@ -1144,13 +1151,14 @@ export default function GamePage() {
             {game.phase === "verdict" && game.me.alive && !isAccused && <><div><b>도시의 최종 판결</b><span>판결 완료 {game.decision_progress.completed}/{game.decision_progress.total} · 모두 결정하면 자동 집행됩니다.</span></div><button className={game.me.judgement === false ? "secondary-button judgement-selected" : "secondary-button"} aria-pressed={game.me.judgement === false} onClick={() => commitJudgement(false)}><ShieldCheck size={17} />석방</button><button className={game.me.judgement === true ? "danger-button judgement-selected" : "danger-button"} aria-pressed={game.me.judgement === true} onClick={() => commitJudgement(true)}><Gavel size={17} />처형</button></>}
             {game.phase === "verdict" && (!game.me.alive || isAccused) && <div><b>판결 집계 중</b><span>{isAccused ? "도시가 당신의 운명을 결정하고 있습니다." : "생존한 시민의 판결을 기다리고 있습니다."}</span></div>}
             {["reveal", "dawn", "result"].includes(game.phase) && <div><b>{game.story.at(-1)}</b><span>잠시 후 다음 단계로 넘어갑니다.</span></div>}
-            {game.phase === "gameover" && <><div><b>{game.winner === "mafia" ? "마피아 팀 승리" : game.winner === "trickster" ? "광대 단독 승리" : "시민 팀 승리"}</b><span>모든 역할이 공개되었습니다.</span></div><button className="secondary-button" onClick={() => setCaseOpen(true)}><BookOpen size={17} />전체 기록</button><button className="secondary-button" onClick={() => createPoster("result")}><Share2 size={17} />사건 리포트</button>{game.host === game.me.id && <button className="primary-button compact" onClick={() => send({ t: "rematch" })}><RotateCcw size={17} />다시 하기</button>}</>}
+            {game.phase === "gameover" && <><div><b>{game.winner === "mafia" ? "마피아 팀 승리" : game.winner === "trickster" ? "광대 단독 승리" : "시민 팀 승리"}</b><span>{getEndingLine(game)}</span></div><button className="secondary-button" onClick={() => setCaseOpen(true)}><BookOpen size={17} />전체 기록</button><button className="secondary-button" onClick={() => createPoster("result")}><Share2 size={17} />사건 리포트</button>{game.host === game.me.id && <button className="primary-button compact" onClick={() => send({ t: "rematch" })}><RotateCcw size={17} />다시 하기</button>}</>}
           </div>
         </section>
 
         <aside className="comms-panel">
           <div className="story-card">
             <div className="story-card-head"><div className="panel-label">CASE INVESTIGATION</div><button onClick={() => setCaseOpen(true)}><BookOpen size={13} />전체 기록</button></div>
+            {caseNarrative && activeChapter && <NarrativeRail game={game} narrative={caseNarrative} chapter={activeChapter} />}
             <div className="ai-director"><div><Radio size={14} /><b>현장 지휘실 · 다음 수사</b><i /></div><p>{game.guide}</p></div>
             <div className="forensic-board">
               <header><Search size={14} /><span><b>현장 감식 단서</b><small>{game.clues.length ? `${game.clues.length}개 확보 · 범인을 포함한 후보군` : "첫 번째 사건 보고를 기다리는 중"}</small></span></header>
@@ -1203,6 +1211,31 @@ export default function GamePage() {
   );
 }
 
+function NarrativeSceneCard({ game, narrative, chapter, narrativeLine }: { game: GameState; narrative: CaseNarrative; chapter: CaseNarrative["chapters"][number]; narrativeLine: string }) {
+  const chapterIndex = narrative.chapters.findIndex((item) => item.id === chapter.id);
+  const ending = game.phase === "gameover" ? getEndingLine(game) : null;
+  return (
+    <section className={`narrative-scene-card narrative-scene-${chapter.id}`} aria-label="현재 사건 장면">
+      <div className="narrative-scene-top"><span>{chapter.label}</span><small>{narrative.codename} · {String(chapterIndex + 1).padStart(2, "0")} / {String(narrative.chapters.length).padStart(2, "0")}</small></div>
+      <div className="narrative-scene-copy"><b>{game.phase === "gameover" ? "사건의 마지막 문장" : chapter.title}</b><p>{game.phase === "gameover" ? getEndingLine(game) : narrativeLine}</p></div>
+      <div className="narrative-scene-steps" aria-label="사건 챕터 진행">
+        {narrative.chapters.map((item, index) => <i key={item.id} className={index < chapterIndex ? "done" : index === chapterIndex ? "active" : ""} title={item.label} />)}
+      </div>
+    </section>
+  );
+}
+
+function NarrativeRail({ game, narrative, chapter }: { game: GameState; narrative: CaseNarrative; chapter: CaseNarrative["chapters"][number] }) {
+  const chapterIndex = narrative.chapters.findIndex((item) => item.id === chapter.id);
+  return (
+    <section className="narrative-rail" aria-label="사건 서사 진행">
+      <header><div><span>CASE NARRATIVE</span><b>{narrative.codename}</b></div><small>CHAPTER {chapterIndex + 1} / {narrative.chapters.length}</small></header>
+      <p className="narrative-motif">“{game.phase === "lobby" ? narrative.prologue : narrative.motif}”</p>
+      <div className="narrative-rail-steps">{narrative.chapters.map((item, index) => <div key={item.id} className={index < chapterIndex ? "done" : index === chapterIndex ? "active" : ""}><i /><span>{item.label.replace(/^CHAPTER \d+ · /, "")}</span></div>)}</div>
+    </section>
+  );
+}
+
 function TutorialModal({ step, setStep, onClose }: { step: number; setStep: (step: number) => void; onClose: () => void }) {
   const scene = TUTORIAL_SCENES[step];
   const SceneIcon = scene.icon;
@@ -1247,12 +1280,13 @@ function InviteModal({ room, online, copied, onClose, onCopy, onShare, onPoster 
 }
 
 function CaseFileModal({ game, room, onClose, onCopy }: { game: GameState; room: string; onClose: () => void; onCopy: () => void }) {
+  const narrative = getCaseNarrative(game.case_profile.id);
   return (
     <div className="case-backdrop" role="dialog" aria-modal="true" aria-label="전체 사건 기록">
       <section className="case-modal">
-        <header><div><span>BLACK MIDNIGHT / ARCHIVE</span><h2>사건 파일</h2><p>ROOM {room} · DAY {game.round || 0}</p></div><button onClick={onClose} aria-label="사건 기록 닫기"><X size={19} /></button></header>
+        <header><div><span>BLACK MIDNIGHT / ARCHIVE · {narrative.codename}</span><h2>사건 파일</h2><p>ROOM {room} · DAY {game.round || 0} · {game.case_profile.location}</p></div><button onClick={onClose} aria-label="사건 기록 닫기"><X size={19} /></button></header>
         <div className="case-modal-grid">
-          <aside><div className="case-seal"><Gavel size={26} /><span>{game.phase === "gameover" ? "CASE CLOSED" : "ACTIVE CASE"}</span></div><h3>용의자 기록</h3>{game.players.map((player, index) => <div className="case-suspect" key={player.id}><div className={`avatar-photo avatar-${index % 12}`} /><span><b>{player.n}</b><small>{game.phase === "gameover" && player.role ? ROLE_META[player.role].name : player.alive ? "생존 · 신원 미상" : "사망 · 신원 미상"}</small></span><em>{player.score} PTS</em></div>)}</aside>
+          <aside><div className="case-seal"><Gavel size={26} /><span>{game.phase === "gameover" ? "CASE CLOSED" : "ACTIVE CASE"}</span></div><div className="case-prologue"><small>PROLOGUE · {game.case_profile.victim}</small><b>{game.case_profile.title}</b><p>{narrative.prologue}</p><em>{narrative.motif}</em></div><h3>용의자 기록</h3>{game.players.map((player, index) => <div className="case-suspect" key={player.id}><div className={`avatar-photo avatar-${index % 12}`} /><span><b>{player.n}</b><small>{game.phase === "gameover" && player.role ? ROLE_META[player.role].name : player.alive ? "생존 · 신원 미상" : "사망 · 신원 미상"}</small></span><em>{player.score} PTS</em></div>)}</aside>
           <article><div className="case-log-title"><span>FORENSIC EVIDENCE</span><b>{game.clues.length} CLUES</b></div>{game.clues.length > 0 && <div className="case-clue-grid">{game.clues.map((clue) => <div key={clue.id}><span>{clue.code}</span><b>{clue.title}</b><p>{clue.detail}</p><small>{clue.outcome}</small></div>)}</div>}<div className="case-log-title timeline-title"><span>INCIDENT TIMELINE</span><b>{game.case_log.length} RECORDS</b></div><div className="case-log-scroll">{game.case_log.length === 0 && <p className="case-empty">아직 기록된 사건이 없습니다.</p>}{game.case_log.map((line, index) => <div key={`${line}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><p>{line}</p></div>)}</div><button className="secondary-button case-copy" onClick={onCopy}><Clipboard size={16} />전체 사건 기록 복사</button></article>
         </div>
       </section>
