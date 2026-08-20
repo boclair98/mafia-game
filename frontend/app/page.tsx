@@ -32,6 +32,7 @@ type InstallPromptEvent = Event & {
 
 type LocalStats = { games: number; wins: number; streak: number };
 type LegalPage = "terms" | "privacy" | "community";
+type JoinMode = "party" | "solo";
 
 const PHASE_META = {
   lobby: ["용의자 대기실", "모두가 정체를 숨기면 자정의 사건이 시작됩니다."],
@@ -114,10 +115,11 @@ const LANDING_ROLES = [
   { code: "ROLE 04", name: "시민", tagline: "말을 쫓는 증인", copy: "능력 대신 질문과 기록으로 거짓말의 모순을 찾습니다.", avatar: 8 },
 ] as const;
 
-function makeRoom() {
+function makeRoom(mode: JoinMode = "party") {
   const left = ["silent", "black", "hidden", "last", "red"];
   const right = ["moon", "alley", "hotel", "signal", "midnight"];
-  return `${left[Math.floor(Math.random() * left.length)]}-${right[Math.floor(Math.random() * right.length)]}-${Math.floor(100 + Math.random() * 900)}`;
+  const prefix = mode === "solo" ? "solo-" : "";
+  return `${prefix}${left[Math.floor(Math.random() * left.length)]}-${right[Math.floor(Math.random() * right.length)]}-${Math.floor(100 + Math.random() * 900)}`;
 }
 
 function getPlayerKey(room: string) {
@@ -138,10 +140,12 @@ export default function GamePage() {
   const identity = useMe();
   const socketRef = useRef<GameSocket | null>(null);
   const receivedPhaseRef = useRef<GameState["phase"] | null>(null);
+  const soloLaunchRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [joined, setJoined] = useState(false);
   const [nick, setNick] = useState("");
   const [roomInput, setRoomInput] = useState("");
+  const [joinMode, setJoinMode] = useState<JoinMode>("party");
   const [room, setRoom] = useState("");
   const [status, setStatus] = useState<ConnStatus>("connecting");
   const [welcome, setWelcome] = useState<WelcomeMsg | null>(null);
@@ -219,8 +223,11 @@ export default function GamePage() {
     let mounted = true;
     queueMicrotask(() => {
       if (!mounted) return;
-      setRoomInput(params.get("room") || makeRoom());
-      setInvitedByLink(Boolean(params.get("room")));
+      const requestedRoom = params.get("room") || "";
+      const requestedMode: JoinMode = params.get("mode") === "solo" || requestedRoom.startsWith("solo-") ? "solo" : "party";
+      setJoinMode(requestedMode);
+      setRoomInput(requestedRoom || makeRoom(requestedMode));
+      setInvitedByLink(Boolean(requestedRoom));
       setNick(localStorage.getItem("black-midnight:nick") || "");
       const savedStats = localStorage.getItem("black-midnight:stats");
       if (savedStats) {
@@ -502,7 +509,7 @@ export default function GamePage() {
         setWelcome(null);
         setGame(null);
         setJoined(false);
-        setNotice(reason === "room_full" ? "이 방은 정원이 가득 찼습니다. 다른 사건 코드를 선택해 주세요." : "방장이 좌석을 정리했습니다. 새 사건에 다시 합류해 주세요.");
+        setNotice(reason === "room_full" ? "이 방은 정원이 가득 찼습니다. 다른 사건 코드를 선택해 주세요." : reason === "solo_room" ? "혼자 수사 전용 방입니다. 친구와 플레이하려면 친구 방을 새로 만들어 주세요." : "방장이 좌석을 정리했습니다. 새 사건에 다시 합류해 주세요.");
         window.setTimeout(() => setNotice(""), 4800);
       },
       onMessage: (raw) => {
@@ -567,6 +574,19 @@ export default function GamePage() {
     return () => socket.close();
   }, [joined, room, nick]);
 
+  // A solo room is a deliberate one-tap path: once the socket confirms the
+  // lobby, the host immediately asks the server to seat the AI cast and start
+  // the case. Party rooms keep the ready/invite flow unchanged.
+  useEffect(() => {
+    if (!joined || joinMode !== "solo" || !game || game.phase !== "lobby" || game.host !== game.me.id) return;
+    if (soloLaunchRef.current) return;
+    soloLaunchRef.current = true;
+    const timer = window.setTimeout(() => {
+      if (!socketRef.current?.send({ t: "solo_start" })) soloLaunchRef.current = false;
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [game?.host, game?.me.id, game?.phase, joined, joinMode]);
+
   // The landing page is intentionally long. When a player opens the join
   // sheet from its lower CTA, browsers preserve the old scroll offset while
   // replacing the landing tree with the game tree. Always start the case at
@@ -606,11 +626,15 @@ export default function GamePage() {
   const submitJoin = (event: FormEvent) => {
     event.preventDefault();
     const safeNick = nick.trim().slice(0, 16);
-    const safeRoom = roomInput.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || makeRoom();
+    let safeRoom = roomInput.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || makeRoom(joinMode);
+    if (joinMode === "solo" && !safeRoom.startsWith("solo-")) safeRoom = `solo-${safeRoom}`.slice(0, 32);
     if (!safeNick || !termsAccepted) return;
     localStorage.setItem("black-midnight:terms-v1", "1");
     localStorage.setItem("black-midnight:nick", safeNick);
-    history.replaceState(null, "", `?room=${encodeURIComponent(safeRoom)}`);
+    const query = new URLSearchParams({ room: safeRoom });
+    if (joinMode === "solo") query.set("mode", "solo");
+    history.replaceState(null, "", `?${query.toString()}`);
+    soloLaunchRef.current = false;
     setNick(safeNick);
     setRoom(safeRoom);
     setJoined(true);
@@ -619,6 +643,7 @@ export default function GamePage() {
   const cancelJoin = () => {
     socketRef.current?.close();
     socketRef.current = null;
+    soloLaunchRef.current = false;
     setJoined(false);
     setWelcome(null);
     setGame(null);
@@ -947,7 +972,13 @@ export default function GamePage() {
     setNotice("전체 사건 기록을 복사했습니다.");
   };
 
-  const focusJoinCard = () => {
+  const chooseJoinMode = (mode: JoinMode) => {
+    setJoinMode(mode);
+    if (!invitedByLink) setRoomInput(makeRoom(mode));
+  };
+
+  const focusJoinCard = (mode: JoinMode = "party") => {
+    chooseJoinMode(mode);
     setJoinOpen(true);
     window.setTimeout(() => document.querySelector<HTMLInputElement>("#landing-nick")?.focus(), 180);
   };
@@ -982,8 +1013,9 @@ export default function GamePage() {
             <p className="campaign-tagline">한 명이 죽었다.<br />범인은 아직 이 방 안에 있다.</p>
             <button className="campaign-play" type="button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }} aria-label="30초 사건 브리핑 재생"><span><Film size={22} /></span><b>30초 사건 브리핑</b></button>
             <div className="campaign-actions">
-              <button className="campaign-primary" type="button" onClick={focusJoinCard}><span>{invitedByLink ? "초대받은 사건에 합류" : "사건 수사 시작"}</span><ChevronRight size={19} /></button>
-              <button className="campaign-secondary" type="button" onClick={focusJoinCard}><Users size={17} />친구 방 코드로 합류</button>
+              <button className="campaign-primary" type="button" onClick={() => focusJoinCard(invitedByLink ? joinMode : "party")}><span>{invitedByLink ? "초대받은 사건에 합류" : "친구와 함께 사건 시작"}</span><ChevronRight size={19} /></button>
+              <button className="campaign-secondary campaign-solo" type="button" onClick={() => focusJoinCard("solo")}><Bot size={17} />혼자 수사 · AI 7명</button>
+              <button className="campaign-secondary" type="button" onClick={() => focusJoinCard("party")}><Users size={17} />친구 방 코드로 합류</button>
             </div>
             <div className="campaign-proof"><span><Check size={12} />설치 없이 시작</span><span><Mic size={12} />실시간 음성</span><span><Users size={12} />4–12인 추리</span></div>
           </div>
@@ -1008,7 +1040,7 @@ export default function GamePage() {
         </section>
 
         <section className="campaign-final-cta">
-          <span>YOUR TESTIMONY CHANGES EVERYTHING</span><h2>오늘 밤, 당신은<br />누구를 믿겠습니까?</h2><button type="button" onClick={focusJoinCard}>{invitedByLink ? "초대장 열기" : "첫 번째 사건 시작"}<ChevronRight size={19} /></button>
+          <span>YOUR TESTIMONY CHANGES EVERYTHING</span><h2>오늘 밤, 당신은<br />누구를 믿겠습니까?</h2><button type="button" onClick={() => focusJoinCard(invitedByLink ? joinMode : "solo")}>{invitedByLink ? "초대장 열기" : "혼자 사건 시작"}<ChevronRight size={19} /></button>
           <div className="campaign-record"><button type="button" onClick={() => setRankingOpen(true)}><Trophy size={15} />{leaderboard[0] ? `현재 최고 기록 ${leaderboard[0].name} · ${leaderboard[0].best_score}점` : "첫 번째 전설이 되어보세요"}</button><span>{stats.games} PLAY · {stats.wins} WIN · {stats.streak} STREAK</span></div>
         </section>
 
@@ -1019,19 +1051,23 @@ export default function GamePage() {
             <div className="join-card-top"><span>PRIVATE CASE TABLE</span><span className="live-dot">온라인</span></div>
             {invitedByLink && <div className="invited-room"><UserPlus size={15} /><span><b>비밀 초대장이 도착했습니다</b><small>{roomInput} 사건의 자리가 확보되어 있습니다.</small></span></div>}
             <div className="join-object-seal" aria-hidden="true"><LockKeyhole size={24} /><span>SEALED</span></div>
-            <h2 id="join-gate-title">{invitedByLink ? "수사 초대에 응답" : "사건 담당자 등록"}</h2>
-            <p>수사에서 사용할 이름을 정하세요. 입장하는 순간 당신의 역할과 비밀 지침이 봉인됩니다.</p>
-            <div className="join-steps"><span className="active"><b>01</b>이름 설정</span><i /><span><b>02</b>친구 합류</span><i /><span><b>03</b>역할 봉인</span></div>
+            <h2 id="join-gate-title">{invitedByLink ? "수사 초대에 응답" : joinMode === "solo" ? "혼자 수사 방 만들기" : "친구와 함께 방 만들기"}</h2>
+            <p>{joinMode === "solo" ? "AI 용의자 7명이 자동으로 합류합니다. 이름을 입력하면 바로 첫 번째 밤이 시작됩니다." : "수사에서 사용할 이름을 정하세요. 친구에게 방 코드를 공유하면 함께 사건에 합류할 수 있습니다."}</p>
+            {!invitedByLink && <div className="join-mode-picker" aria-label="플레이 방식 선택">
+              <button type="button" className={joinMode === "party" ? "active" : ""} onClick={() => chooseJoinMode("party")}><Users size={17} /><span><b>친구와 함께</b><small>4–12인 · 초대 링크</small></span></button>
+              <button type="button" className={joinMode === "solo" ? "active solo" : ""} onClick={() => chooseJoinMode("solo")}><Bot size={17} /><span><b>혼자 수사</b><small>AI 7명 · 즉시 시작</small></span></button>
+            </div>}
+            <div className="join-steps"><span className="active"><b>01</b>이름 설정</span><i /><span><b>{joinMode === "solo" ? "02" : "02"}</b>{joinMode === "solo" ? "AI 합류" : "친구 합류"}</span><i /><span><b>03</b>역할 봉인</span></div>
             <div className="join-warning"><Skull size={14} /><span>아무도 믿지 마세요. 목소리도 단서가 됩니다.</span></div>
             <form onSubmit={submitJoin}>
               <label><span>당신의 이름 <em>{nick.length}/16</em></span><input id="landing-nick" value={nick} onChange={(e) => setNick(e.target.value)} placeholder="게임에서 불릴 이름" maxLength={16} /></label>
-              <label><span>비밀 방 코드 <em>{invitedByLink ? "초대 링크에서 확인됨" : "친구와 공유할 코드"}</em></span><div className="room-field"><input value={roomInput} onChange={(e) => { setRoomInput(e.target.value); setInvitedByLink(false); }} maxLength={32} /><button type="button" onClick={() => { setRoomInput(makeRoom()); setInvitedByLink(false); }} aria-label="새 방 코드 만들기"><RotateCcw size={15} /></button></div></label>
+              <label><span>비밀 방 코드 <em>{invitedByLink ? "초대 링크에서 확인됨" : joinMode === "solo" ? "혼자 수사 전용 코드" : "친구와 공유할 코드"}</em></span><div className="room-field"><input value={roomInput} onChange={(e) => { setRoomInput(e.target.value); setInvitedByLink(false); }} maxLength={32} /><button type="button" onClick={() => { setRoomInput(makeRoom(joinMode)); setInvitedByLink(false); }} aria-label="새 방 코드 만들기"><RotateCcw size={15} /></button></div></label>
               <label className="terms-check"><input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span><b>커뮤니티 규칙과 이용약관에 동의합니다</b><small><button type="button" onClick={() => setLegalPage("terms")}>이용약관</button> · <button type="button" onClick={() => setLegalPage("community")}>커뮤니티 가이드</button> · <button type="button" onClick={() => setLegalPage("privacy")}>개인정보</button></small></span></label>
-              <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim() || !termsAccepted}><LogIn size={18} /><span>{!termsAccepted ? "규칙에 동의하고 입장" : nick.trim() ? `${nick.trim()}님으로 수사 합류` : "이름을 입력하고 수사 합류"}</span><ChevronRight size={16} /></button>
+              <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim() || !termsAccepted}><LogIn size={18} /><span>{!termsAccepted ? "규칙에 동의하고 입장" : joinMode === "solo" ? "AI 용의자 7명과 즉시 시작" : nick.trim() ? `${nick.trim()}님으로 수사 합류` : "이름을 입력하고 수사 합류"}</span><ChevronRight size={16} /></button>
             </form>
             {installPrompt && <button className="install-button" type="button" onClick={installApp}><Smartphone size={16} /> 홈 화면에 앱 설치</button>}
             <div className="join-proof"><span><Check size={12} />설치 없음</span><span><Check size={12} />AI 인원 채우기</span><span><Check size={12} />실시간 음성</span></div>
-            <div className="join-foot"><Users size={15} /> 최소 4명부터 시작 · 최대 12명 · 초보자 브리핑 제공</div>
+            <div className="join-foot">{joinMode === "solo" ? <><Bot size={15} /> AI 용의자 7명 · 혼자서도 완결되는 사건 · 초보자 브리핑 제공</> : <><Users size={15} /> 최소 4명부터 시작 · 최대 12명 · 초보자 브리핑 제공</>}</div>
           </section>
         </div>}
         {tutorialOpen && <TutorialModal step={tutorialStep} setStep={setTutorialStep} onClose={closeTutorial} />}
@@ -1139,7 +1175,7 @@ export default function GamePage() {
         <section className="table-panel">
           <div className="panel-heading"><div><span>{game.phase === "lobby" ? "SUSPECT FILES" : "THE TABLE"}</span><h2>{game.phase === "lobby" ? "용의자 명단" : "참가자"}</h2></div><div>{game.players.filter((p) => p.alive).length} 생존</div></div>
           {caseNarrative && activeChapter && <NarrativeSceneCard game={game} narrative={caseNarrative} chapter={activeChapter} narrativeLine={narrativeLine} />}
-          {game.phase === "lobby" && humanCount === 1 && game.host === game.me.id && <section className="solo-mode-card"><div className="solo-mode-icon"><Bot size={22} /></div><div><small>SOLO CASE MODE · AI CAST</small><b>혼자서도 한 편의 사건을 시작하세요</b><p>7명의 AI 용의자가 각자 다른 말투와 판단 성향으로 움직입니다. 친구가 들어오면 언제든 다음 판을 함께 시작할 수 있습니다.</p></div><button type="button" onClick={() => send({ t: "solo_start" })}><Sparkles size={15} />혼자 사건 시작</button></section>}
+          {game.phase === "lobby" && game.lobby_mode === "solo" && humanCount === 1 && game.host === game.me.id && <section className="solo-mode-card"><div className="solo-mode-icon"><Bot size={22} /></div><div><small>SOLO CASE MODE · AI CAST</small><b>혼자서도 한 편의 사건을 시작하세요</b><p>이 방은 혼자 수사 전용입니다. 7명의 AI 용의자가 자동으로 합류한 뒤 사건이 시작됩니다.</p></div><button type="button" onClick={() => send({ t: "solo_start" })}><Sparkles size={15} />혼자 사건 시작</button></section>}
           {game.round_event && game.phase !== "lobby" && (
             <section className={`round-event-card event-${game.round_event.id}`}>
               <div><Sparkles size={17} /><span><small>{game.round_event.tag} · DAY {game.round}</small><b>{game.round_event.title}</b></span></div>
@@ -1233,7 +1269,7 @@ export default function GamePage() {
                 {game.host === game.me.id && <div className="bot-fill-switch"><Bot size={14} /><span>AI 인원</span>{[4, 6, 8].map((target) => <button key={target} className={game.players.length === target ? "active" : ""} onClick={() => send({ t: "fill_bots", target })}>{target}</button>)}</div>}
                 <button className="secondary-button" onClick={() => setInviteOpen(true)}><UserPlus size={17} />친구 초대</button>
                 {game.host !== game.me.id && <button className="secondary-button" onClick={() => send({ t: "ready" })}>{me?.ready ? <Check size={17} /> : <ShieldQuestion size={17} />}{me?.ready ? "준비 취소" : "준비하기"}</button>}
-                {game.host === game.me.id && humanCount === 1 && <button className="secondary-button solo-start-button" onClick={() => send({ t: "solo_start" })}><Bot size={17} />혼자 사건 시작</button>}
+                {game.host === game.me.id && game.lobby_mode === "solo" && humanCount === 1 && <button className="secondary-button solo-start-button" onClick={() => send({ t: "solo_start" })}><Bot size={17} />혼자 사건 시작</button>}
                 {game.host === game.me.id && <button className="primary-button compact start-game-button" disabled={game.players.length < game.min_players || unreadyPlayers.length > 0} onClick={() => send({ t: "start" })}><Skull size={17} /><span>{unreadyPlayers.length ? `${unreadyPlayers.length}명 준비 대기` : "게임 시작"}</span></button>}
               </>
             )}
@@ -1282,7 +1318,7 @@ export default function GamePage() {
       </div>
       <div className={`mobile-command-dock command-${game.phase}`}>
         <span><small>{game.phase === "night" ? "NIGHT ORDER" : game.phase === "vote" ? "SEALED BALLOT" : game.phase === "verdict" ? "FINAL VERDICT" : "CURRENT OBJECTIVE"}</small><b>{remaining > 0 ? `${remaining}초 · ` : ""}{currentDirective}</b></span>
-        {game.phase === "lobby" && game.host === game.me.id && humanCount === 1 ? <button className="primary solo-dock-button" onClick={() => send({ t: "solo_start" })}><Bot size={15} />혼자 사건 시작</button> : game.phase === "lobby" && game.host === game.me.id && <button className="primary" disabled={game.players.length >= game.min_players && unreadyPlayers.length > 0} onClick={() => game.players.length < game.min_players ? send({ t: "fill_bots", target: game.min_players }) : send({ t: "start" })}>{game.players.length < game.min_players ? `AI ${game.min_players}명 채우기` : unreadyPlayers.length ? "준비 대기" : "게임 시작"}</button>}
+        {game.phase === "lobby" && game.host === game.me.id && game.lobby_mode === "solo" && humanCount === 1 ? <button className="primary solo-dock-button" onClick={() => send({ t: "solo_start" })}><Bot size={15} />혼자 사건 시작</button> : game.phase === "lobby" && game.host === game.me.id && <button className="primary" disabled={game.players.length >= game.min_players && unreadyPlayers.length > 0} onClick={() => game.players.length < game.min_players ? send({ t: "fill_bots", target: game.min_players }) : send({ t: "start" })}>{game.players.length < game.min_players ? `AI ${game.min_players}명 채우기` : unreadyPlayers.length ? "준비 대기" : "게임 시작"}</button>}
         {game.phase === "lobby" && game.host !== game.me.id && <button className={me?.ready ? "" : "primary"} onClick={() => send({ t: "ready" })}>{me?.ready ? "준비 취소" : "준비하기"}</button>}
         {game.phase === "night" && game.me.alive && ["mafia", "doctor", "detective", "bodyguard"].includes(role) && <button className="primary" onClick={() => selected ? commitDecision("action") : setMobileTab("suspects")}>{selected ? "명령 봉인" : "대상 선택"}</button>}
         {game.phase === "vote" && game.me.alive && <button className="danger" onClick={() => selected ? commitDecision("vote") : setMobileTab("suspects")}>{selected ? "표 봉인" : "용의자 선택"}</button>}

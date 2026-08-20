@@ -196,6 +196,9 @@ class Player:
 class Room:
     def __init__(self, name: str) -> None:
         self.name = name
+        # Solo room codes are intentionally recognisable and server-enforced;
+        # a copied solo link must not silently turn into a party lobby.
+        self.lobby_mode = "solo" if name.startswith("solo-") else "party"
         self.players: dict[str, Player] = {}
         self.host_id: str | None = None
         self.phase = "lobby"
@@ -1521,6 +1524,7 @@ class Room:
             "deadline": round(self.deadline * 1000),
             "winner": self.winner,
             "mode": self.mode,
+            "lobby_mode": self.lobby_mode,
             "pace": self.pace,
             "host": self.host_id,
             "min_players": MIN_PLAYERS,

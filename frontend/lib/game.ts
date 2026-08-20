@@ -44,6 +44,7 @@ export type GameState = {
   phase: Phase;
   round: number;
   mode?: "solo" | "party";
+  lobby_mode?: "solo" | "party";
   deadline: number;
   winner: "mafia" | "citizen" | "trickster" | null;
   pace: "quick" | "classic";

@@ -44,7 +44,7 @@ export function gameSocketUrl(room: string, nick: string, key: string): string {
 type Handlers = {
   onMessage: (msg: unknown) => void;
   onStatus: (status: ConnStatus) => void;
-  onFatal?: (reason: "room_full" | "removed_by_host") => void;
+  onFatal?: (reason: "room_full" | "solo_room" | "removed_by_host") => void;
 };
 
 export class GameSocket {
@@ -117,10 +117,10 @@ export class GameSocket {
       if (this.pingTimer) clearInterval(this.pingTimer);
       this.pingTimer = null;
       if (this.closed) return;
-      if (event.code === 4003 || event.code === 4004) {
+      if (event.code === 4003 || event.code === 4004 || event.code === 4005) {
         this.closed = true;
         this.handlers.onStatus("failed");
-        this.handlers.onFatal?.(event.code === 4004 ? "room_full" : "removed_by_host");
+        this.handlers.onFatal?.(event.code === 4004 ? "room_full" : event.code === 4005 ? "solo_room" : "removed_by_host");
         return;
       }
       this.handlers.onStatus("reconnecting");

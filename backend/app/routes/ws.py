@@ -53,6 +53,11 @@ async def game_socket(
     ):
         await ws.close(code=4004, reason="room_full")
         return
+    if arena.phase == "lobby" and arena.lobby_mode == "solo" and arena.connected_players and not any(
+        p.key == player_key for p in arena.players.values()
+    ):
+        await ws.close(code=4005, reason="solo_room")
+        return
 
     await ws.accept()
     player, resumed = arena.join(ws, chosen_nick, coders_id, player_key)
