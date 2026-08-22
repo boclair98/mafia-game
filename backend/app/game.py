@@ -102,6 +102,22 @@ MISSIONS = [
     "투표가 끝나기 전 한 번은 기존 의견을 재검토하기",
 ]
 
+MEMORY_PROMPTS = [
+    "사건 직전 마지막으로 본 사람과 장소를 기록하세요.",
+    "오늘 밤 가장 믿고 싶은 사람과 그 이유를 남기세요.",
+    "범인이 남겼을 법한 작은 흔적을 한 문장으로 상상하세요.",
+    "아침에 가장 먼저 확인할 기록을 적어 두세요.",
+]
+
+SCENE_FRAGMENTS = [
+    {"id": "scene-gate", "time": "00:38", "title": "출입 기록", "detail": "서쪽 출입문이 한 번 열리고, 잠금 장치가 12초 늦게 닫혔습니다."},
+    {"id": "scene-blackout", "time": "00:39", "title": "짧은 정전", "detail": "복도 카메라가 47초 동안 검게 변했습니다. 누군가 기록실에 접근했습니다."},
+    {"id": "scene-trace", "time": "00:40", "title": "젖은 흔적", "detail": "창가에서 젖은 구두 자국 두 개와 끊긴 섬유 조각이 발견됐습니다."},
+    {"id": "scene-call", "time": "00:41", "title": "마지막 통화", "detail": "피해자의 전화에서 18초짜리 발신 기록이 남았지만 상대는 확인되지 않았습니다."},
+    {"id": "scene-exit", "time": "00:42", "title": "잠긴 현장", "detail": "비상등이 켜진 뒤 객실이 안쪽에서 잠겼고, 현장의 시계가 멈췄습니다."},
+]
+SCENE_ORDER = [fragment["id"] for fragment in SCENE_FRAGMENTS]
+
 FORENSIC_CLUES = [
     ("CCTV 음영 구역", "00:38~00:42 사이 복도 카메라에서 {suspects} 중 한 명의 동선이 끊겼습니다."),
     ("미세 섬유 조각", "현장에서 발견된 짙은 섬유는 {suspects} 중 한 명의 외투에서 떨어졌을 가능성이 있습니다."),
@@ -237,6 +253,15 @@ class Room:
         self.private_leads: dict[str, dict[str, Any]] = {}
         self.public_leads: deque[dict[str, Any]] = deque(maxlen=18)
         self.ghost_predictions: dict[str, str] = {}
+        self.memory_seals: dict[str, dict[str, Any]] = {}
+        self.memory_prompts: dict[str, str] = {}
+        self.scene_fragments: dict[str, list[dict[str, Any]]] = {}
+        self.scene_submissions: dict[str, dict[str, Any]] = {}
+        self.scene_results: dict[str, dict[str, Any]] = {}
+        self.oaths: dict[str, dict[str, Any]] = {}
+        self.ghost_echoes: deque[dict[str, Any]] = deque(maxlen=24)
+        self.ghost_echo_marks: set[str] = set()
+        self.director_beats: deque[dict[str, Any]] = deque(maxlen=12)
         self.round_event: dict[str, Any] | None = None
         self.pressure_marks: dict[str, str] = {}
         self.awards: list[dict[str, str | int]] = []
@@ -248,6 +273,45 @@ class Room:
     def _record(self, line: str) -> None:
         self.story.append(line)
         self.case_log.append(line)
+
+    def _director_beat(self, title: str, copy: str, tone: str = "amber") -> None:
+        """Add a short, server-authored scene beat without revealing roles."""
+        beat = {
+            "id": secrets.token_hex(4),
+            "round": self.round,
+            "title": title,
+            "copy": copy,
+            "tone": tone,
+            "at": int(time.time() * 1000),
+        }
+        self.director_beats.append(beat)
+        self._moment("director", f"{title} — {copy}")
+
+    def _prepare_scene(self) -> None:
+        """Deal three evidence fragments to each player for the timeline puzzle."""
+        active = [p for p in self.players.values() if p.role != "spectator"]
+        self.scene_fragments = {
+            player.id: random.sample(SCENE_FRAGMENTS, min(3, len(SCENE_FRAGMENTS)))
+            for player in active
+        }
+        self.scene_submissions.clear()
+        self.scene_results.clear()
+
+    def _mission_completed(self, player: Player) -> bool:
+        mission = player.mission
+        if not mission:
+            return False
+        if mission.startswith("낮 토론"):
+            return len({item["speaker_id"] for item in self.questions if item["round"] == self.round and item["from_id"] == player.id}) >= 2
+        if mission.startswith("첫 투표"):
+            return any(key.startswith(f"{self.round}:") and key.endswith(player.id) for key in self.pressure_marks)
+        if mission.startswith("누군가를"):
+            return any(item.get("actor") == player.id and item.get("kind") == "claim" for item in self.moments) and player.id in self.judgements
+        if mission.startswith("자신의 역할"):
+            return any(item.get("from_id") == player.id and any(word in str(item.get("text", "")) for word in ("능력", "밤", "조사", "치료", "경호")) for item in self.chat)
+        if mission.startswith("투표가"):
+            return len(self.reads.get(player.id, {})) >= 2
+        return False
 
     def _moment(
         self,
@@ -600,6 +664,14 @@ class Room:
         self.private_leads.clear()
         self.public_leads.clear()
         self.ghost_predictions.clear()
+        self.memory_seals.clear()
+        self.memory_prompts = {player.id: random.choice(MEMORY_PROMPTS) for player in active}
+        self.scene_submissions.clear()
+        self.scene_results.clear()
+        self.oaths.clear()
+        self.ghost_echoes.clear()
+        self.ghost_echo_marks.clear()
+        self.director_beats.clear()
         self.pressure_marks.clear()
         self.awards.clear()
         self.round_event = None
@@ -615,6 +687,8 @@ class Room:
         if self.mode == "solo":
             self._record("혼자 수사 모드 — AI 용의자 7명이 각자의 기억과 의심을 들고 앉았습니다.")
         self._draw_round_event()
+        self._prepare_scene()
+        self._director_beat("사건 감독관", "각자 다른 기록 조각을 받았습니다. 기억을 봉인하고 현장 순서를 맞춰 보세요.", "blue")
         self._deal_private_leads(active)
         self._bot_marks.clear()
         self._bot_suspicions.clear()
@@ -651,6 +725,15 @@ class Room:
         self.private_leads.clear()
         self.public_leads.clear()
         self.ghost_predictions.clear()
+        self.memory_seals.clear()
+        self.memory_prompts.clear()
+        self.scene_fragments.clear()
+        self.scene_submissions.clear()
+        self.scene_results.clear()
+        self.oaths.clear()
+        self.ghost_echoes.clear()
+        self.ghost_echo_marks.clear()
+        self.director_beats.clear()
         self.pressure_marks.clear()
         self.awards.clear()
         self.round_event = None
@@ -929,6 +1012,97 @@ class Room:
         self.ghost_predictions[pid] = target_id
         return None
 
+    def seal_memory(self, pid: str, raw: str) -> str | None:
+        """Let each player lock a private first impression before discussion."""
+        player = self.players.get(pid)
+        text = " ".join(raw.strip().split())[:160]
+        if self.phase != "reveal" or not player or not player.alive or player.role == "spectator":
+            return "역할 공개 중인 생존자만 기억을 봉인할 수 있습니다."
+        if pid in self.memory_seals:
+            return "기억은 한 번만 봉인할 수 있습니다."
+        if len(text) < 5:
+            return "다섯 글자 이상으로 첫 인상을 남겨 주세요."
+        self.memory_seals[pid] = {
+            "id": secrets.token_hex(5), "owner_id": pid, "owner": player.nick,
+            "text": text, "round": self.round, "sealed_at": int(time.time() * 1000),
+        }
+        self._record(f"{player.nick}님의 첫 기억이 봉인되었습니다.")
+        self._moment("memory", "한 명의 기억이 봉인되었습니다.", actor=pid)
+        return None
+
+    def reconstruct_scene(self, pid: str, raw_order: object) -> str | None:
+        """Score a player's personal reconstruction of the shared crime timeline."""
+        player = self.players.get(pid)
+        if self.phase not in {"dawn", "day", "vote"} or not player or not player.alive:
+            return "아침부터 투표 전까지 살아 있는 수사관만 현장을 재구성할 수 있습니다."
+        if not isinstance(raw_order, list):
+            return "현장 조각의 순서를 확인해 주세요."
+        cards = self.scene_fragments.get(pid, [])
+        allowed = {str(card.get("id")) for card in cards}
+        order = [str(item) for item in raw_order]
+        if len(order) < 2 or len(order) != len(set(order)) or any(item not in allowed for item in order):
+            return "받은 기록 조각을 두 개 이상, 중복 없이 선택해 주세요."
+        if self.scene_submissions.get(pid, {}).get("round") == self.round:
+            return "이번 라운드의 현장 재구성은 이미 제출했습니다."
+        positions = {fragment_id: index for index, fragment_id in enumerate(SCENE_ORDER)}
+        correct_pairs = sum(
+            positions.get(left, -1) < positions.get(right, -1)
+            for left, right in zip(order, order[1:], strict=True)
+        )
+        total = max(1, len(order) - 1)
+        score = round(correct_pairs / total * 100)
+        self.scene_submissions[pid] = {"round": self.round, "order": order, "at": int(time.time() * 1000)}
+        self.scene_results[pid] = {
+            "round": self.round, "score": score, "total": total,
+            "correct_pairs": correct_pairs, "submitted_at": int(time.time() * 1000),
+        }
+        self._record(f"{player.nick}님이 현장 타임라인을 제출했습니다. ({score}점)")
+        self._moment("reconstruction", "현장 타임라인이 제출되었습니다.", actor=pid)
+        return None
+
+    def make_oath(self, pid: str, target_id: str, raw: str) -> str | None:
+        player = self.players.get(pid)
+        target = self.players.get(target_id)
+        text = " ".join(raw.strip().split())[:100] or "다음 투표에서 이 사람을 지목하겠습니다."
+        if self.phase != "day" or not player or not player.alive:
+            return "낮 토론 중인 생존자만 맹세를 남길 수 있습니다."
+        if not target or not target.alive or target.id == player.id or target.role == "spectator":
+            return "살아 있는 다른 용의자를 선택해 주세요."
+        if self.oaths.get(pid, {}).get("round") == self.round:
+            return "이번 라운드의 맹세는 이미 봉인되었습니다."
+        self.oaths[pid] = {
+            "id": secrets.token_hex(5), "owner_id": pid, "owner": player.nick,
+            "target_id": target.id, "target": target.nick, "text": text,
+            "round": self.round, "kept": None,
+        }
+        self._record(f"{player.nick}님이 공개 맹세를 봉인했습니다.")
+        self._moment("oath", "한 명의 공개 맹세가 봉인되었습니다.", actor=pid, target=target.id)
+        return None
+
+    def ghost_echo(self, pid: str, raw: str) -> str | None:
+        player = self.players.get(pid)
+        text = " ".join(raw.strip().split())[:120]
+        if not player or player.alive or player.role in {"spectator", "mafia"}:
+            return "시민 팀의 사망자만 유령 메시지를 남길 수 있습니다."
+        if self.phase in {"lobby", "reveal", "night", "gameover"}:
+            return "아침이 밝은 뒤에만 유령 메시지를 남길 수 있습니다."
+        mark = f"{self.round}:{pid}"
+        if mark in self.ghost_echo_marks:
+            return "이번 라운드에는 유령 메시지를 한 번만 남길 수 있습니다."
+        if len(text) < 5:
+            return "다섯 글자 이상으로 흔적을 남겨 주세요."
+        if any(candidate.nick and len(candidate.nick) >= 2 and candidate.nick in text for candidate in self.players.values()):
+            return "유령 메시지에는 특정 생존자의 이름을 직접 적을 수 없습니다."
+        echo = {
+            "id": secrets.token_hex(5), "owner_id": pid, "owner": player.nick,
+            "text": text, "round": self.round, "at": int(time.time() * 1000),
+        }
+        self.ghost_echoes.append(echo)
+        self.ghost_echo_marks.add(mark)
+        self._record("사망자의 유령 메시지가 사건 파일에 남았습니다.")
+        self._moment("ghost_echo", "새로운 유령 메시지가 기록되었습니다.", actor=pid)
+        return None
+
     def report_player(self, pid: str, target_id: str, raw_reason: str) -> str | None:
         reporter = self.players.get(pid)
         target = self.players.get(target_id)
@@ -984,6 +1158,19 @@ class Room:
             )
             self._set_phase("day", max(self._seconds("day"), alive_count * 12))
             self._start_interrogation()
+            victim = self.players.get(self.last_death_id or "")
+            if victim:
+                self._director_beat(
+                    "현장 감독관",
+                    f"{victim.nick}님의 마지막 동선을 복원하세요. 각자 가진 기록 조각이 다릅니다.",
+                    "red",
+                )
+            else:
+                self._director_beat(
+                    "현장 감독관",
+                    "희생자는 없지만 기록이 어긋났습니다. 먼저 말하는 사람이 모든 것을 알고 있지는 않습니다.",
+                    "blue",
+                )
         elif self.phase == "day":
             self.speaker_id = None
             self.speaker_deadline = 0.0
@@ -1001,12 +1188,22 @@ class Room:
                             f"{target.nick}님을 지목했습니다."
                         )
             self._record("투표가 시작되었습니다. 가장 의심스러운 사람을 지목하세요.")
+            self._director_beat(
+                "감독관의 경고",
+                "봉인된 맹세와 현장 재구성 결과를 함께 비교한 뒤 표를 제출하세요.",
+                "amber",
+            )
             self._set_phase("vote", self._seconds("vote"))
         elif self.phase == "vote":
             self._resolve_vote()
         elif self.phase == "defense":
             self.judgements.clear()
             self._record("최후 변론이 끝났습니다. 처형 찬반 판결을 시작합니다.")
+            self._director_beat(
+                "최후 변론 기록관",
+                "피고인의 마지막 문장과 아침에 봉인된 맹세를 대조해 판결하세요.",
+                "purple",
+            )
             self._set_phase("verdict", self._seconds("verdict"))
         elif self.phase == "verdict":
             self._resolve_verdict()
@@ -1018,8 +1215,13 @@ class Room:
             self._bot_suspicions.clear()
             self.accused_id = None
             self.judgements.clear()
+            self.scene_submissions.clear()
+            self.scene_results.clear()
+            self.oaths.clear()
             self._record(f"{self.round}일차 밤이 찾아왔습니다.")
             self._draw_round_event()
+            self._prepare_scene()
+            self._director_beat("새로운 기록 조각", "현장에 남은 순서가 다시 섞였습니다. 서로 가진 기록을 비교하세요.", "blue")
             self._set_phase("night", self._seconds("night"))
 
     def _seconds(self, phase: str) -> int:
@@ -1129,10 +1331,96 @@ class Room:
             return f"{line} {target.nick}님, 이 부분부터 설명해 주세요."
         return line
 
+    def _run_day_bots(self, bots: list[Player], alive: list[Player], elapsed: float) -> None:
+        if elapsed <= 3:
+            return
+        for bot in bots:
+            pressure_key = f"{self.round}:{bot.id}"
+            duration = max(1.0, self.deadline - self.phase_started_at)
+            if pressure_key not in self.pressure_marks and elapsed > duration * 0.58:
+                pressure_targets = [p for p in alive if p.id != bot.id]
+                if bot.role == "mafia":
+                    pressure_targets = [p for p in pressure_targets if p.role != "mafia"]
+                preferred = self.players.get(self._bot_suspicions.get(bot.id, ""))
+                target = preferred if preferred in pressure_targets else self._bot_choose_target(bot, pressure_targets)
+                if target:
+                    self.apply_pressure(bot.id, target.id)
+            if bot.id != self.speaker_id:
+                continue
+            mark = f"day:{self.round}:{bot.id}"
+            persona = self._bot_persona(bot)
+            if mark not in self._bot_marks and random.random() < persona["talk_chance"]:
+                self._bot_marks.add(mark)
+                candidates = [p for p in alive if p.id != bot.id]
+                if bot.role == "mafia":
+                    candidates = [p for p in candidates if p.role != "mafia"]
+                target = self.players.get(self._bot_suspicions.get(bot.id, ""))
+                if not target or not target.alive:
+                    target = self._bot_choose_target(bot, candidates)
+                if target:
+                    self._bot_suspicions[bot.id] = target.id
+                line = self._bot_line(bot, target) if target else random.choice(BOT_LINES)
+                self.chat.append({"id": secrets.token_hex(4), "from": bot.nick, "from_id": bot.id, "text": line,
+                                  "visibility": "all", "at": int(time.time() * 1000)})
+                if target and random.random() < 0.42:
+                    self.add_tip(
+                        bot.id,
+                        f"{target.nick}님의 발언과 사건 기록의 시간대가 맞는지 다시 확인해 보세요.",
+                    )
+                if not any(item["round"] == self.round and item["speaker_id"] == bot.id for item in self.claims):
+                    claim = f"제 판단은 {target.nick}님을 우선 확인해야 한다는 것입니다." if target else line
+                    self.claims.append({
+                        "id": secrets.token_hex(4), "speaker_id": bot.id,
+                        "speaker": bot.nick, "text": claim, "round": self.round,
+                        "at": int(time.time() * 1000),
+                    })
+                    line = f"공식 진술 — {bot.nick}: {claim}"
+                    self.case_log.append(line)
+                    self._moment("claim", line, actor=bot.id)
+
     def _run_bots(self) -> None:
         bots = [p for p in self.players.values() if p.is_bot and p.alive]
+        dead_bots = [
+            p for p in self.players.values()
+            if p.is_bot and not p.alive and p.role not in {"mafia", "spectator"}
+        ]
         alive = [p for p in self.players.values() if p.alive and p.role != "spectator"]
-        if self.phase == "night":
+        elapsed = time.time() - self.phase_started_at
+        if self.phase == "reveal":
+            for bot in bots:
+                if bot.id not in self.memory_seals and elapsed > 4:
+                    prompt = self.memory_prompts.get(bot.id, MEMORY_PROMPTS[0])
+                    self.seal_memory(bot.id, f"{prompt} 기록을 먼저 확인하겠습니다.")
+        elif self.phase in {"dawn", "day"}:
+            # Bots play the same optional meta-games as humans so solo mode
+            # still produces a readable trail of commitments and mistakes.
+            for bot in bots:
+                if bot.id not in self.scene_submissions and elapsed > 8:
+                    cards = self.scene_fragments.get(bot.id, [])
+                    order = [card["id"] for card in cards]
+                    if random.random() < 0.45:
+                        random.shuffle(order)
+                    if len(order) >= 2:
+                        self.reconstruct_scene(bot.id, order)
+                if self.phase == "day" and bot.id not in self.oaths and elapsed > 16:
+                    targets = [p for p in alive if p.id != bot.id]
+                    if bot.role == "mafia":
+                        targets = [p for p in targets if p.role != "mafia"]
+                    target = self._bot_choose_target(bot, targets)
+                    if target:
+                        self.make_oath(bot.id, target.id, "다음 투표에서 이 사람의 알리바이를 확인하겠습니다.")
+            if elapsed > 5:
+                for ghost in dead_bots:
+                    mark = f"{self.round}:{ghost.id}"
+                    if mark not in self.ghost_echo_marks:
+                        self.ghost_echo(ghost.id, random.choice([
+                            "시간 기록의 순서가 틀어졌습니다. 먼저 들린 것은 금속음이었습니다.",
+                            "창가의 흔적보다 복도 불빛이 먼저 사라졌습니다. 기억해 두세요.",
+                            "한 문장이 너무 완벽합니다. 완벽한 알리바이를 다시 확인하세요.",
+                        ]))
+            if self.phase == "day":
+                self._run_day_bots(bots, alive, elapsed)
+        elif self.phase == "night":
             for bot in bots:
                 if bot.id in self.actions or bot.role not in {"mafia", "doctor", "detective", "bodyguard"}:
                     continue
@@ -1141,51 +1429,6 @@ class Room:
                     targets = [p for p in targets if p.role != "mafia"]
                 if targets:
                     self.actions[bot.id] = random.choice(targets).id
-        elif self.phase == "day" and time.time() - self.phase_started_at > 3:
-            for bot in bots:
-                pressure_key = f"{self.round}:{bot.id}"
-                elapsed = time.time() - self.phase_started_at
-                duration = max(1.0, self.deadline - self.phase_started_at)
-                if pressure_key not in self.pressure_marks and elapsed > duration * 0.58:
-                    pressure_targets = [p for p in alive if p.id != bot.id]
-                    if bot.role == "mafia":
-                        pressure_targets = [p for p in pressure_targets if p.role != "mafia"]
-                    preferred = self.players.get(self._bot_suspicions.get(bot.id, ""))
-                    target = preferred if preferred in pressure_targets else self._bot_choose_target(bot, pressure_targets)
-                    if target:
-                        self.apply_pressure(bot.id, target.id)
-                if bot.id != self.speaker_id:
-                    continue
-                mark = f"day:{self.round}:{bot.id}"
-                persona = self._bot_persona(bot)
-                if mark not in self._bot_marks and random.random() < persona["talk_chance"]:
-                    self._bot_marks.add(mark)
-                    candidates = [p for p in alive if p.id != bot.id]
-                    if bot.role == "mafia":
-                        candidates = [p for p in candidates if p.role != "mafia"]
-                    target = self.players.get(self._bot_suspicions.get(bot.id, ""))
-                    if not target or not target.alive:
-                        target = self._bot_choose_target(bot, candidates)
-                    if target:
-                        self._bot_suspicions[bot.id] = target.id
-                    line = self._bot_line(bot, target) if target else random.choice(BOT_LINES)
-                    self.chat.append({"id": secrets.token_hex(4), "from": bot.nick, "from_id": bot.id, "text": line,
-                                      "visibility": "all", "at": int(time.time() * 1000)})
-                    if target and random.random() < 0.42:
-                        self.add_tip(
-                            bot.id,
-                            f"{target.nick}님의 발언과 사건 기록의 시간대가 맞는지 다시 확인해 보세요.",
-                        )
-                    if not any(item["round"] == self.round and item["speaker_id"] == bot.id for item in self.claims):
-                        claim = f"제 판단은 {target.nick}님을 우선 확인해야 한다는 것입니다." if target else line
-                        self.claims.append({
-                            "id": secrets.token_hex(4), "speaker_id": bot.id,
-                            "speaker": bot.nick, "text": claim, "round": self.round,
-                            "at": int(time.time() * 1000),
-                        })
-                        line = f"공식 진술 — {bot.nick}: {claim}"
-                        self.case_log.append(line)
-                        self._moment("claim", line, actor=bot.id)
         elif self.phase == "vote":
             for bot in bots:
                 if bot.id not in self.votes:
@@ -1282,6 +1525,9 @@ class Room:
 
     def _resolve_vote(self) -> None:
         counts = Counter(self.votes.values())
+        for oath in self.oaths.values():
+            if oath.get("round") == self.round and oath.get("owner_id") in self.votes:
+                oath["kept"] = self.votes.get(oath["owner_id"]) == oath.get("target_id")
         accused: Player | None = None
         if counts:
             ordered = counts.most_common()
@@ -1377,6 +1623,18 @@ class Room:
                 and self.players[target_id].role == "mafia"
             )
             p.score += pressure_hits * 6
+            if self._mission_completed(p):
+                p.score += 10
+            scene_result = self.scene_results.get(p.id)
+            if scene_result and scene_result.get("score", 0) >= 67:
+                p.score += 8
+            oath = self.oaths.get(p.id)
+            if oath and oath.get("kept") is True:
+                p.score += 8
+            elif oath and oath.get("kept") is False:
+                p.score = max(0, p.score - 2)
+            if any(echo.get("owner_id") == p.id for echo in self.ghost_echoes):
+                p.score += 4
         self._build_awards()
         self._set_phase("gameover", 0)
         if not any(player.coders_id is not None for player in self.players.values()):
@@ -1508,6 +1766,15 @@ class Room:
                     "hold": counts["hold"],
                     "suspect": counts["suspect"],
                 }
+        visible_memory_reveals = [
+            seal for seal in self.memory_seals.values()
+            if self.phase == "gameover"
+            or (self.players.get(seal.get("owner_id", "")) and not self.players[seal["owner_id"]].alive)
+        ]
+        scene_completed = sum(
+            result.get("round") == self.round for result in self.scene_results.values()
+        )
+        current_oaths = [oath for oath in self.oaths.values() if oath.get("round") == self.round]
         return {
             "t": "state",
             "room": self.name,
@@ -1521,6 +1788,14 @@ class Room:
             },
             "awards": list(self.awards) if self.phase == "gameover" else [],
             "public_leads": list(self.public_leads),
+            "memory_reveals": visible_memory_reveals,
+            "scene_progress": {
+                "completed": scene_completed,
+                "total": sum(player.alive and player.role != "spectator" for player in self.players.values()),
+            },
+            "oaths": current_oaths,
+            "ghost_echoes": list(self.ghost_echoes),
+            "director_beats": list(self.director_beats)[-5:],
             "tips": list(self.tips)[-12:],
             "phase": self.phase,
             "round": self.round,
@@ -1559,6 +1834,7 @@ class Room:
                 "judgement": self.judgements.get(viewer.id),
                 "intel": viewer.intel[-4:],
                 "mission": viewer.mission,
+                "mission_completed": self._mission_completed(viewer) if self.phase != "lobby" else False,
                 "can_tip": (
                     self.phase == "day" and viewer.alive
                     and f"{self.round}:{viewer.id}" not in self.tip_marks
@@ -1579,6 +1855,33 @@ class Room:
                     and self.players[self.ghost_predictions[viewer.id]].role == "mafia"
                 ) if viewer.id in self.ghost_predictions else None,
                 "pressure_target": self.pressure_marks.get(pressure_key),
+                "memory_prompt": self.memory_prompts.get(viewer.id, MEMORY_PROMPTS[0]),
+                "memory_seal": self.memory_seals.get(viewer.id),
+                "can_seal_memory": (
+                    self.phase == "reveal" and viewer.alive and viewer.role != "spectator"
+                    and viewer.id not in self.memory_seals
+                ),
+                "scene_fragments": self.scene_fragments.get(viewer.id, []),
+                "scene_result": self.scene_results.get(viewer.id),
+                "can_reconstruct": (
+                    self.phase in {"dawn", "day", "vote"} and viewer.alive
+                    and self.scene_submissions.get(viewer.id, {}).get("round") != self.round
+                ),
+                "oath_target": self.oaths.get(viewer.id, {}).get("target_id"),
+                "oath_text": self.oaths.get(viewer.id, {}).get("text", ""),
+                "can_oath": (
+                    self.phase == "day" and viewer.alive
+                    and self.oaths.get(viewer.id, {}).get("round") != self.round
+                ),
+                "can_ghost_message": (
+                    not viewer.alive and viewer.role not in {"mafia", "spectator"}
+                    and self.phase not in {"lobby", "reveal", "night", "gameover"}
+                    and f"{self.round}:{viewer.id}" not in self.ghost_echo_marks
+                ),
+                "ghost_message": next(
+                    (echo.get("text") for echo in self.ghost_echoes if echo.get("owner_id") == viewer.id),
+                    None,
+                ),
             },
             "accused_id": self.accused_id,
             "judgement_counts": {

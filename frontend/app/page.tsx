@@ -157,6 +157,11 @@ export default function GamePage() {
   const [claimText, setClaimText] = useState("");
   const [tipText, setTipText] = useState("");
   const [willText, setWillText] = useState("");
+  const [memoryText, setMemoryText] = useState("");
+  const [sceneOrder, setSceneOrder] = useState<string[]>([]);
+  const [oathTarget, setOathTarget] = useState<string | null>(null);
+  const [oathText, setOathText] = useState("");
+  const [ghostText, setGhostText] = useState("");
   const [notice, setNotice] = useState("");
   const [now, setNow] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -541,6 +546,11 @@ export default function GamePage() {
             ballot_feed: next.ballot_feed ?? [],
             clues: next.clues ?? [],
             public_leads: next.public_leads ?? [],
+            memory_reveals: next.memory_reveals ?? [],
+            scene_progress: next.scene_progress ?? { completed: 0, total: 0 },
+            oaths: next.oaths ?? [],
+            ghost_echoes: next.ghost_echoes ?? [],
+            director_beats: next.director_beats ?? [],
             decision_progress: next.decision_progress ?? { completed: 0, total: 0 },
             case_log: next.case_log ?? next.story ?? [],
             reactions: next.reactions ?? [],
@@ -560,8 +570,26 @@ export default function GamePage() {
               ghost_prediction: next.me.ghost_prediction ?? null,
               ghost_correct: next.me.ghost_correct ?? null,
               pressure_target: next.me.pressure_target ?? null,
+              mission_completed: next.me.mission_completed ?? false,
+              memory_prompt: next.me.memory_prompt ?? "사건 직전 마지막으로 본 사람과 장소를 기록하세요.",
+              memory_seal: next.me.memory_seal ?? null,
+              can_seal_memory: next.me.can_seal_memory ?? false,
+              scene_fragments: next.me.scene_fragments ?? [],
+              scene_result: next.me.scene_result ?? null,
+              can_reconstruct: next.me.can_reconstruct ?? false,
+              oath_target: next.me.oath_target ?? null,
+              oath_text: next.me.oath_text ?? "",
+              can_oath: next.me.can_oath ?? false,
+              can_ghost_message: next.me.can_ghost_message ?? false,
+              ghost_message: next.me.ghost_message ?? null,
             },
           });
+          if (phaseChanged) {
+            setSceneOrder([]);
+            setOathTarget(next.me.oath_target ?? null);
+            setOathText("");
+            setGhostText("");
+          }
           setSelected((current) => {
             if (phaseChanged) {
               if (next.phase === "night") return next.me.action_target ?? null;
@@ -970,6 +998,34 @@ export default function GamePage() {
     setWillText("");
   };
 
+  const submitMemory = (event: FormEvent) => {
+    event.preventDefault();
+    const text = memoryText.trim();
+    if (!text || !game?.me.can_seal_memory) return;
+    if (!send({ t: "memory_seal", text })) return;
+    setMemoryText("");
+  };
+
+  const submitOath = (event: FormEvent) => {
+    event.preventDefault();
+    if (!game?.me.can_oath || !oathTarget) return;
+    if (!send({ t: "oath", target: oathTarget, text: oathText.trim() })) return;
+    setOathText("");
+  };
+
+  const submitGhostEcho = (event: FormEvent) => {
+    event.preventDefault();
+    const text = ghostText.trim();
+    if (!text || !game?.me.can_ghost_message) return;
+    if (!send({ t: "ghost_echo", text })) return;
+    setGhostText("");
+  };
+
+  const submitScene = () => {
+    if (!game?.me.can_reconstruct || sceneOrder.length < 2) return;
+    send({ t: "reconstruct", order: sceneOrder });
+  };
+
   const copyCaseFile = async () => {
     if (!game) return;
     const roles = game.players.filter((player) => player.role).map((player) => `${player.n} — ${ROLE_META[player.role!].name} · ${player.score}점`).join("\n");
@@ -1177,8 +1233,8 @@ export default function GamePage() {
 
       <div className="game-grid">
         <aside className={`role-panel role-${roleMeta.color}`}>
-          {game.phase === "lobby" ? <><div className="panel-label">SEALED IDENTITY</div><div className="sealed-role"><ShieldQuestion size={36} /><span>CLASSIFIED</span></div><h2>배역 봉인</h2><p>게임이 시작되는 순간 당신만의 역할이 공개됩니다.</p><div className="sealed-notice"><Skull size={14} /><span>이 방의 누군가는 마피아가 됩니다.</span></div></> : <><div className="panel-label">MY SECRET</div><div className={`role-photo avatar-photo avatar-${Math.max(0, game.players.findIndex((player) => player.id === game.me.id)) % 12}`}><span><RoleIcon size={24} /></span></div><h2>{roleMeta.name}</h2><p>{roleMeta.copy}</p><div className="role-dossier"><div><Crosshair size={13} /><span><small>WIN CONDITION</small><b>{roleMeta.goal}</b></span></div><div><Activity size={13} /><span><small>FIELD ABILITY</small><b>{roleMeta.power}</b></span></div><p>{roleMeta.cover}</p></div>{role === "mafia" && <div className="secret-box"><b>마피아 동료</b><span>{game.players.filter((p) => p.mafia && p.id !== game.me.id).map((p) => p.n).join(", ") || "당신 혼자입니다"}</span></div>}{game.me.intel.length > 0 && <div className="secret-box intel"><b>조사 기록</b>{game.me.intel.map((line) => <span key={line}>{line}</span>)}</div>}{game.me.mission && <div className="secret-box mission"><b>이번 판 비밀 미션</b><span>{game.me.mission}</span></div>}<div className="evidence-board"><div><Search size={14} /><b>나만의 추리 보드</b></div>{game.players.filter((player) => player.id !== game.me.id).slice(0, 8).map((player) => <div className="evidence-row" key={player.id}><span>{player.n}</span><button className={evidence[player.id] === 1 ? "safe active" : "safe"} onClick={() => setEvidence((current) => ({ ...current, [player.id]: current[player.id] === 1 ? 0 : 1 }))}>안전</button><button className={evidence[player.id] === -1 ? "suspect active" : "suspect"} onClick={() => setEvidence((current) => ({ ...current, [player.id]: current[player.id] === -1 ? 0 : -1 }))}>의심</button></div>)}</div>{!game.me.alive && role !== "spectator" && <div className="dead-stamp">사망</div>}</>}
-        </aside>
+          {game.phase === "lobby" ? <><div className="panel-label">SEALED IDENTITY</div><div className="sealed-role"><ShieldQuestion size={36} /><span>CLASSIFIED</span></div><h2>배역 봉인</h2><p>게임이 시작되는 순간 당신만의 역할이 공개됩니다.</p><div className="sealed-notice"><Skull size={14} /><span>이 방의 누군가는 마피아가 됩니다.</span></div></> : <><div className="panel-label">MY SECRET</div><div className={`role-photo avatar-photo avatar-${Math.max(0, game.players.findIndex((player) => player.id === game.me.id)) % 12}`}><span><RoleIcon size={24} /></span></div><h2>{roleMeta.name}</h2><p>{roleMeta.copy}</p><div className="role-dossier"><div><Crosshair size={13} /><span><small>WIN CONDITION</small><b>{roleMeta.goal}</b></span></div><div><Activity size={13} /><span><small>FIELD ABILITY</small><b>{roleMeta.power}</b></span></div><p>{roleMeta.cover}</p></div>{role === "mafia" && <div className="secret-box"><b>마피아 동료</b><span>{game.players.filter((p) => p.mafia && p.id !== game.me.id).map((p) => p.n).join(", ") || "당신 혼자입니다"}</span></div>}{game.me.intel.length > 0 && <div className="secret-box intel"><b>조사 기록</b>{game.me.intel.map((line) => <span key={line}>{line}</span>)}</div>}{game.me.mission && <div className="secret-box mission"><b>이번 판 비밀 미션</b><span>{game.me.mission}</span><em className={game.me.mission_completed ? "completed" : ""}>{game.me.mission_completed ? "MISSION COMPLETE · +10" : "진행 중"}</em></div>}<div className="evidence-board"><div><Search size={14} /><b>나만의 추리 보드</b></div>{game.players.filter((player) => player.id !== game.me.id).slice(0, 8).map((player) => <div className="evidence-row" key={player.id}><span>{player.n}</span><button className={evidence[player.id] === 1 ? "safe active" : "safe"} onClick={() => setEvidence((current) => ({ ...current, [player.id]: current[player.id] === 1 ? 0 : 1 }))}>안전</button><button className={evidence[player.id] === -1 ? "suspect active" : "suspect"} onClick={() => setEvidence((current) => ({ ...current, [player.id]: current[player.id] === -1 ? 0 : -1 }))}>의심</button></div>)}</div>{!game.me.alive && role !== "spectator" && <div className="dead-stamp">사망</div>}</>}
+          </aside>
 
         <section className="table-panel">
           <div className="panel-heading"><div><span>{game.phase === "lobby" ? "SUSPECT FILES" : "THE TABLE"}</span><h2>{game.phase === "lobby" ? "용의자 명단" : "참가자"}</h2></div><div>{game.players.filter((p) => p.alive).length} 생존</div></div>
@@ -1192,7 +1248,10 @@ export default function GamePage() {
             </section>
           )}
           {game.me.private_lead && game.phase !== "lobby" && <PrivateLeadCard lead={game.me.private_lead} canReveal={game.phase === "day" && game.me.alive} onReveal={() => send({ t: "reveal_lead", lead_id: game.me.private_lead?.id })} />}
-          {!game.me.alive && !["spectator", "mafia"].includes(role) && <AfterlifePanel game={game} onPredict={(target) => send({ t: "ghost_predict", target })} />}
+          {game.phase === "reveal" && <MemorySealCard game={game} text={memoryText} setText={setMemoryText} onSubmit={submitMemory} />}
+          {["dawn", "day", "vote"].includes(game.phase) && <SceneReconstructionCard game={game} order={sceneOrder} setOrder={setSceneOrder} onSubmit={submitScene} />}
+          {game.phase === "day" && <OathCard game={game} target={oathTarget} setTarget={setOathTarget} text={oathText} setText={setOathText} onSubmit={submitOath} />}
+          {!game.me.alive && !["spectator", "mafia"].includes(role) && <AfterlifePanel game={game} onPredict={(target) => send({ t: "ghost_predict", target })} ghostText={ghostText} setGhostText={setGhostText} onEcho={submitGhostEcho} />}
           {accusedPlayer && ["defense", "verdict"].includes(game.phase) && (
             <div className={`trial-stage trial-${game.phase}`}>
               <div className="trial-light" />
@@ -1301,6 +1360,7 @@ export default function GamePage() {
             <div className="story-card-head"><div className="panel-label">CASE INVESTIGATION</div><button onClick={() => setCaseOpen(true)}><BookOpen size={13} />전체 기록</button></div>
             {caseNarrative && activeChapter && <NarrativeRail game={game} narrative={caseNarrative} chapter={activeChapter} />}
             <div className="ai-director"><div><Radio size={14} /><b>현장 지휘실 · 다음 수사</b><i /></div><p>{game.guide}</p></div>
+            {game.director_beats.length > 0 && <DirectorBeatCard beats={game.director_beats} />}
             <div className="forensic-board">
               <header><Search size={14} /><span><b>현장 감식 단서</b><small>{game.clues.length ? `${game.clues.length}개 확보 · 범인을 포함한 후보군` : "첫 번째 사건 보고를 기다리는 중"}</small></span></header>
               {game.clues.length ? <div>{game.clues.slice(-3).reverse().map((clue) => <article key={clue.id}><span>{clue.code}</span><b>{clue.title}</b><p>{clue.detail}</p><small>{clue.outcome} · DAY {clue.round}</small></article>)}</div> : <p className="forensic-empty">밤의 습격이 발생하면 감식반이 범인을 포함한 용의자 묶음을 공개합니다.</p>}
@@ -1483,9 +1543,29 @@ function PrivateLeadCard({ lead, canReveal, onReveal }: { lead: NonNullable<Game
   return <section className={`sealed-lead-card ${lead.revealed ? "revealed" : ""}`}><div className="lead-seal"><LockKeyhole size={18} /></div><span><small>PRIVATE EVIDENCE · 1회 공개</small><b>{lead.title}</b><p>{lead.detail}</p></span>{lead.revealed ? <em><Check size={13} />공개됨</em> : <button disabled={!canReveal} onClick={onReveal}>{canReveal ? "공식 증거로 공개" : "첫 낮에 공개 가능"}</button>}</section>;
 }
 
-function AfterlifePanel({ game, onPredict }: { game: GameState; onPredict: (target: string) => void }) {
+function MemorySealCard({ game, text, setText, onSubmit }: { game: GameState; text: string; setText: (value: string) => void; onSubmit: (event: FormEvent) => void }) {
+  return <section className="memory-seal-card"><header><LockKeyhole size={17} /><span><small>MEMORY SEAL · ROUND {game.round}</small><b>첫 기억을 봉인하세요</b></span><em>{game.memory_reveals.length}개 공개</em></header><p>{game.me.memory_prompt}</p>{game.me.memory_seal ? <div className="memory-sealed-copy"><Check size={14} />{game.me.memory_seal.text}</div> : <form onSubmit={onSubmit}><input value={text} onChange={(event) => setText(event.target.value)} maxLength={160} placeholder="나중에 확인할 첫 인상을 기록하세요" /><button disabled={!game.me.can_seal_memory || text.trim().length < 5}><LockKeyhole size={14} />기억 봉인</button></form>}{game.memory_reveals.length > 0 && <div className="memory-reveal-list">{game.memory_reveals.map((seal) => <article key={seal.id}><small>{seal.owner} · DAY {seal.round}</small><span>{seal.text}</span></article>)}</div>}</section>;
+}
+
+function SceneReconstructionCard({ game, order, setOrder, onSubmit }: { game: GameState; order: string[]; setOrder: (value: string[]) => void; onSubmit: () => void }) {
+  const toggle = (id: string) => setOrder(order.includes(id) ? order.filter((item) => item !== id) : [...order, id]);
+  return <section className="scene-reconstruction-card"><header><Search size={17} /><span><small>CRIME SCENE RECONSTRUCTION · ROUND {game.round}</small><b>현장 타임라인 복원</b></span><em>{game.scene_progress.completed}/{game.scene_progress.total} 제출</em></header><p>당신에게만 보이는 기록 조각을 시간순으로 배열하세요. 다른 사람의 순서와 다를수록 토론의 새 단서가 됩니다.</p><div className="scene-fragment-grid">{game.me.scene_fragments.map((fragment) => <button type="button" key={fragment.id} className={order.includes(fragment.id) ? "picked" : ""} onClick={() => toggle(fragment.id)}><small>{fragment.time}</small><b>{fragment.title}</b><span>{fragment.detail}</span>{order.includes(fragment.id) && <i>{order.indexOf(fragment.id) + 1}</i>}</button>)}</div><footer>{game.me.scene_result ? <span className="scene-result"><Check size={14} />내 재구성 {game.me.scene_result.score}점 · {game.me.scene_result.correct_pairs}/{game.me.scene_result.total} 연결 성공</span> : <><span>{order.length}개 조각 선택</span><button type="button" disabled={!game.me.can_reconstruct || order.length < 2} onClick={onSubmit}><LockKeyhole size={14} />타임라인 제출</button></>}</footer></section>;
+}
+
+function OathCard({ game, target, setTarget, text, setText, onSubmit }: { game: GameState; target: string | null; setTarget: (value: string | null) => void; text: string; setText: (value: string) => void; onSubmit: (event: FormEvent) => void }) {
+  const candidates = game.players.filter((player) => player.alive && player.id !== game.me.id && player.role !== "spectator");
+  return <section className="oath-card"><header><ShieldCheck size={17} /><span><small>PUBLIC OATH · ROUND {game.round}</small><b>말을 맹세로 바꾸기</b></span><em>{game.oaths.length}개 봉인</em></header><p>투표 전에 누구를 지목할지 공개적으로 약속하세요. 실제 표와 비교되어 다음 판 점수에 반영됩니다.</p>{game.oaths.length > 0 && <div className="oath-feed">{game.oaths.slice(-3).map((oath) => <article key={oath.id}><b>{oath.owner}</b><span>→ {oath.target}</span><p>{oath.text}</p>{oath.kept !== null && <small>{oath.kept ? "약속을 지킴" : "약속을 어김"}</small>}</article>)}</div>}{game.me.can_oath ? <form onSubmit={onSubmit}><select value={target ?? ""} onChange={(event) => setTarget(event.target.value || null)}><option value="">지목할 용의자 선택</option>{candidates.map((player) => <option key={player.id} value={player.id}>{player.n}</option>)}</select><input value={text} onChange={(event) => setText(event.target.value)} maxLength={100} placeholder="예: 다음 투표에서 이 사람의 알리바이를 확인하겠습니다" /><button disabled={!target}><LockKeyhole size={14} />맹세 봉인</button></form> : <small className="oath-locked">이번 낮의 맹세는 이미 봉인되었거나 참여할 수 없습니다.</small>}</section>;
+}
+
+function DirectorBeatCard({ beats }: { beats: GameState["director_beats"] }) {
+  const beat = beats.at(-1);
+  if (!beat) return null;
+  return <div className={`director-beat-card tone-${beat.tone}`}><div><Radio size={13} /><span><small>DIRECTOR BEAT · DAY {beat.round}</small><b>{beat.title}</b></span></div><p>{beat.copy}</p></div>;
+}
+
+function AfterlifePanel({ game, onPredict, ghostText, setGhostText, onEcho }: { game: GameState; onPredict: (target: string) => void; ghostText: string; setGhostText: (value: string) => void; onEcho: (event: FormEvent) => void }) {
   const prediction = game.players.find((player) => player.id === game.me.ghost_prediction);
-  return <section className="afterlife-panel"><header><Eye size={17} /><span><small>AFTERLIFE INVESTIGATION</small><b>사후 수사실</b></span></header><p>당신의 목소리는 생존자에게 닿지 않습니다. 사건 기록을 보고 최종 마피아 한 명을 봉인하세요.</p><div>{game.players.filter((player) => player.alive && player.id !== game.me.id).map((player) => <button key={player.id} className={game.me.ghost_prediction === player.id ? "active" : ""} onClick={() => onPredict(player.id)} disabled={game.phase === "gameover"}><span className={`avatar-photo avatar-${Math.max(0, game.players.indexOf(player)) % 12}`} /><b>{player.n}</b>{game.me.ghost_prediction === player.id && <Check size={13} />}</button>)}</div>{prediction && <footer className={game.phase === "gameover" ? game.me.ghost_correct ? "correct" : "wrong" : ""}><LockKeyhole size={13} /><span>{game.phase === "gameover" ? game.me.ghost_correct ? `${prediction.n} — 범인 예측 적중` : `${prediction.n} — 예측 실패` : `${prediction.n}님을 최종 범인으로 봉인했습니다`}</span></footer>}</section>;
+  return <section className="afterlife-panel"><header><Eye size={17} /><span><small>AFTERLIFE INVESTIGATION</small><b>사후 수사실</b></span></header><p>당신의 목소리는 생존자에게 닿지 않습니다. 사건 기록을 보고 최종 마피아 한 명을 봉인하거나, 이름 없는 유령 메시지를 남기세요.</p><div>{game.players.filter((player) => player.alive && player.id !== game.me.id).map((player) => <button key={player.id} className={game.me.ghost_prediction === player.id ? "active" : ""} onClick={() => onPredict(player.id)} disabled={game.phase === "gameover"}><span className={`avatar-photo avatar-${Math.max(0, game.players.indexOf(player)) % 12}`} /><b>{player.n}</b>{game.me.ghost_prediction === player.id && <Check size={13} />}</button>)}</div>{prediction && <footer className={game.phase === "gameover" ? game.me.ghost_correct ? "correct" : "wrong" : ""}><LockKeyhole size={13} /><span>{game.phase === "gameover" ? game.me.ghost_correct ? `${prediction.n} — 범인 예측 적중` : `${prediction.n} — 예측 실패` : `${prediction.n}님을 최종 범인으로 봉인했습니다`}</span></footer>}{game.me.ghost_message && <div className="ghost-message-sealed"><Sparkles size={13} />{game.me.ghost_message}</div>}{game.me.can_ghost_message && <form className="ghost-echo-form" onSubmit={onEcho}><input value={ghostText} onChange={(event) => setGhostText(event.target.value)} maxLength={120} placeholder="이름 없이, 마지막으로 본 흔적을 남기세요" /><button disabled={ghostText.trim().length < 5}><MessageCircle size={14} />유령 메시지</button></form>}</section>;
 }
 
 function PlayerCard({ player, index, self, host, accused, selected, selectable, speaking, suspicion, pressureCount, pressureMarkedByMe, canPressure, mark, phase, onSelect, onPressure }: { player: PlayerState; index: number; self: boolean; host: boolean; accused: boolean; selected: boolean; selectable: boolean; speaking: boolean; suspicion: number; pressureCount: number; pressureMarkedByMe: boolean; canPressure: boolean; mark: -1 | 0 | 1; phase: GameState["phase"]; onSelect: () => void; onPressure: () => void }) {

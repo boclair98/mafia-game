@@ -123,6 +123,18 @@ async def game_socket(
                     error = arena.ghost_predict(
                         player.id, str(msg.get("target", ""))
                     )
+                case "memory_seal":
+                    error = arena.seal_memory(player.id, str(msg.get("text", "")))
+                case "reconstruct":
+                    error = arena.reconstruct_scene(player.id, msg.get("order"))
+                case "oath":
+                    error = arena.make_oath(
+                        player.id,
+                        str(msg.get("target", "")),
+                        str(msg.get("text", "")),
+                    )
+                case "ghost_echo":
+                    error = arena.ghost_echo(player.id, str(msg.get("text", "")))
                 case "report":
                     error = arena.report_player(
                         player.id,

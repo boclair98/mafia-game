@@ -31,6 +31,12 @@ export type PublicLead = { id: string; owner_id: string; owner: string; title: s
 export type RoundEvent = { id: string; title: string; tag: string; copy: string; sealed_pressure: boolean };
 export type CaseAward = { id: string; player_id: string; player: string; title: string; copy: string };
 export type AnonymousTip = { id: string; text: string; round: number; at: number };
+export type MemorySeal = { id: string; owner_id: string; owner: string; text: string; round: number; sealed_at: number };
+export type SceneFragment = { id: string; time: string; title: string; detail: string };
+export type SceneResult = { round: number; score: number; total: number; correct_pairs: number; submitted_at: number };
+export type OathState = { id: string; owner_id: string; owner: string; target_id: string; target: string; text: string; round: number; kept: boolean | null };
+export type GhostEcho = { id: string; owner_id: string; owner: string; text: string; round: number; at: number };
+export type DirectorBeat = { id: string; round: number; title: string; copy: string; tone: string; at: number };
 
 export type GameState = {
   t: "state";
@@ -61,6 +67,7 @@ export type GameState = {
     judgement?: boolean | null;
     intel: string[];
     mission: string;
+    mission_completed: boolean;
     can_tip: boolean;
     reads: Record<string, ReadStance>;
     can_leave_will: boolean;
@@ -68,11 +75,27 @@ export type GameState = {
     ghost_prediction: string | null;
     ghost_correct: boolean | null;
     pressure_target: string | null;
+    memory_prompt: string;
+    memory_seal: MemorySeal | null;
+    can_seal_memory: boolean;
+    scene_fragments: SceneFragment[];
+    scene_result: SceneResult | null;
+    can_reconstruct: boolean;
+    oath_target: string | null;
+    oath_text: string;
+    can_oath: boolean;
+    can_ghost_message: boolean;
+    ghost_message: string | null;
   };
   story: string[];
   case_log: string[];
   clues: CaseClue[];
   public_leads: PublicLead[];
+  memory_reveals: MemorySeal[];
+  scene_progress: { completed: number; total: number };
+  oaths: OathState[];
+  ghost_echoes: GhostEcho[];
+  director_beats: DirectorBeat[];
   accused_id: string | null;
   judgement_counts: { execute: number; spare: number };
   decision_progress: { completed: number; total: number };
