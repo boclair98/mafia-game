@@ -491,6 +491,17 @@ footer { max-width: 1550px; margin: 14px auto; display: flex; justify-content: s
   .join-gate .join-card { padding-left:17px; padding-right:17px; }.join-steps span { font-size:7px; }
 }
 
+/* Desktop command visibility: keep investigation/vote controls inside the
+   central table viewport instead of pushing them below the fold. The roster
+   becomes the scrollable region while the current command remains anchored. */
+@media (min-width:1200px) {
+  .game-grid { height:calc(100dvh - 410px); min-height:0; }
+  .table-panel { height:100%; min-height:0; overflow:hidden; }
+  .table-panel > .player-grid { min-height:0; overflow-y:auto; scrollbar-gutter:stable; }
+  .table-panel > .action-bar { position:sticky; bottom:0; z-index:24; flex:0 0 auto; box-shadow:0 -18px 34px rgba(0,0,0,.62); }
+  .table-panel > .target-lock { flex:0 0 auto; }
+}
+
 @media (max-height:700px) and (max-width:760px) {
   .campaign-play { min-height:52px; }.campaign-play > span { width:38px; height:38px; }.campaign-tagline { margin:8px 0; }.campaign-actions { margin-top:8px; }.campaign-proof { margin-top:8px; }.campaign-scroll { display:none; }
   .join-object-seal { display:none; }.join-gate .join-card h2 { margin-top:24px; }.join-gate .join-card > p { margin-bottom:10px; }.join-steps { margin-bottom:10px; }
