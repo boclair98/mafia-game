@@ -33,10 +33,14 @@ export type CaseAward = { id: string; player_id: string; player: string; title: 
 export type AnonymousTip = { id: string; text: string; round: number; at: number };
 export type MemorySeal = { id: string; owner_id: string; owner: string; text: string; round: number; sealed_at: number };
 export type SceneFragment = { id: string; time: string; title: string; detail: string };
-export type SceneResult = { round: number; score: number; total: number; correct_pairs: number; submitted_at: number };
+export type SceneResult = { round: number; score: number; total: number; correct_pairs: number; causal_pairs?: number; deduction?: string; submitted_at: number };
 export type OathState = { id: string; owner_id: string; owner: string; target_id: string; target: string; text: string; round: number; kept: boolean | null };
 export type GhostEcho = { id: string; owner_id: string; owner: string; text: string; round: number; at: number };
 export type DirectorBeat = { id: string; round: number; title: string; copy: string; tone: string; at: number };
+export type AISocial = { player_id: string; player: string; persona: string; emotion: string; trust: number; memory: string };
+export type CaseBadge = { id: string; title: string; copy: string };
+export type CaseHighlight = { kind: string; title: string; copy: string };
+export type SecretContract = { id: string; owner_id: string; owner: string; target_id: string; target: string; text: string; round: number; accepted: boolean | null };
 
 export type GameState = {
   t: "state";
@@ -50,7 +54,14 @@ export type GameState = {
   phase: Phase;
   round: number;
   mode?: "solo" | "party";
-  lobby_mode?: "solo" | "party";
+  lobby_mode?: "solo" | "party" | "first";
+  case_mode?: "first" | "classic";
+  case_grade?: string;
+  case_badges?: CaseBadge[];
+  final_highlights?: CaseHighlight[];
+  best_persuader?: { player_id: string; player: string; copy: string } | null;
+  ai_social?: AISocial[];
+  contracts?: SecretContract[];
   deadline: number;
   winner: "mafia" | "citizen" | "trickster" | null;
   pace: "quick" | "classic";

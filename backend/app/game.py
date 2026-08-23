@@ -26,6 +26,9 @@ else:
 MIN_PLAYERS = 4
 MAX_PLAYERS = 12
 PACE_SECONDS = {
+    # A guided first case is deliberately short enough to finish in one sitting
+    # while still leaving space for the director's narration and a real vote.
+    "first": {"reveal": 14, "night": 28, "dawn": 10, "day": 78, "vote": 34, "defense": 26, "verdict": 24, "result": 10},
     # Even the quick table leaves room for the announcer, role reveal, and a
     # complete thought before the next phase arrives. The old 12/40 second
     # windows made a first-time player miss the hand-off between screens.
@@ -33,6 +36,7 @@ PACE_SECONDS = {
     "classic": {"reveal": 24, "night": 90, "dawn": 24, "day": 240, "vote": 100, "defense": 80, "verdict": 70, "result": 24},
 }
 EARLY_ADVANCE_MINIMUM = {
+    "first": {"night": 18, "vote": 22, "verdict": 16},
     "quick": {"night": 45, "vote": 40, "verdict": 35},
     "classic": {"night": 60, "vote": 60, "verdict": 50},
 }
@@ -131,6 +135,28 @@ CASE_PROFILES = [
     {"id": "night-train", "code": "BM-717", "title": "7호 야간열차 밀실", "location": "자정행 7호 열차", "victim": "탐사 기자 윤재하", "briefing": "터널을 통과한 4분 동안 기자가 살해됐습니다. 용의자는 모두 같은 객차에 있었습니다."},
     {"id": "black-wing", "code": "BM-113", "title": "검은 날개 전시관", "location": "아르카 미술관", "victim": "수석 큐레이터 차유진", "briefing": "정전 직후 경보가 울렸고 큐레이터가 사라졌습니다. 위조된 작품표가 범인의 동선을 가리킵니다."},
     {"id": "observatory", "code": "BM-042", "title": "관측소의 00시 42분", "location": "북악 천문 관측소", "victim": "천문학자 강이안", "briefing": "관측 기록이 끊긴 90초 사이 사건이 벌어졌습니다. 남겨진 신호는 내부자의 암호입니다."},
+    {"id": "archive-fire", "code": "BM-206", "title": "불타지 않은 기록실", "location": "구시청 지하 기록실", "victim": "기록관 서지후", "briefing": "화재 경보는 울렸지만 단 한 장의 사건 파일만 사라졌습니다. 출입카드는 세 번 복제됐습니다."},
+    {"id": "rooftop-rain", "code": "BM-318", "title": "옥상에 남은 빗방울", "location": "동쪽 송신탑 옥상", "victim": "기상 캐스터 한도윤", "briefing": "폭우 속 송신이 끊긴 3분, 옥상 문은 안에서 잠겼습니다. 젖은 발자국은 두 방향으로 갈립니다."},
+    {"id": "glasshouse", "code": "BM-527", "title": "유리온실의 빈자리", "location": "백야 식물원 유리온실", "victim": "보존가 윤소담", "briefing": "온실의 습도 기록과 실제 발자국이 맞지 않습니다. 누군가 알리바이를 위해 자동 급수를 켰습니다."},
+    {"id": "radio-room", "code": "BM-631", "title": "02:17 라디오 침묵", "location": "폐쇄된 심야 라디오국", "victim": "프로듀서 이가람", "briefing": "생방송 신호가 17초 끊긴 사이 사건이 일어났습니다. 마지막 큐시트가 찢겨 있습니다."},
+    {"id": "ferry-deck", "code": "BM-744", "title": "안개 속 3번 갑판", "location": "새벽항 여객선", "victim": "선내 의사 최문아", "briefing": "안개 경보 중 갑판의 CCTV가 회전했습니다. 승객 명부에는 한 명의 가짜 이름이 있습니다."},
+    {"id": "theatre-box", "code": "BM-856", "title": "막이 내린 뒤의 객석", "location": "월광 극장 2층 박스석", "victim": "연출가 오태성", "briefing": "커튼콜 직후 조명이 꺼졌고 박스석이 잠겼습니다. 무대 소품의 위치가 한 걸음 어긋나 있습니다."},
+    {"id": "subway-platform", "code": "BM-903", "title": "막차 플랫폼의 빈 90초", "location": "검은선 지하철 9번 승강장", "victim": "노선 설계자 박예린", "briefing": "막차가 들어온 90초 동안 승강장 카메라가 지워졌습니다. 승차 태그는 네 개뿐입니다."},
+    {"id": "winter-cabin", "code": "BM-117", "title": "눈보라 전의 난로", "location": "북부 산장 1호실", "victim": "사진가 민재호", "briefing": "눈보라가 길을 막기 직전 난로의 재가 뒤집혔습니다. 밖으로 나간 발자국은 하나뿐입니다."},
+    {"id": "museum-vault", "code": "BM-268", "title": "금고 안의 푸른 봉인", "location": "청람 박물관 보존 금고", "victim": "감정사 정하린", "briefing": "금고는 열리지 않았지만 봉인만 바뀌었습니다. 감식 장갑의 섬유가 용의자 셋을 가리킵니다."},
+    {"id": "rooftop-garden", "code": "BM-371", "title": "정원에 떨어진 검은 씨앗", "location": "도심 옥상정원", "victim": "도시농부 강세아", "briefing": "새벽 급수 장치가 한 번 작동했고, 화단 흙에서 낯선 금속 조각이 발견됐습니다."},
+    {"id": "hotel-kitchen", "code": "BM-482", "title": "마지막 주문은 4번 테이블", "location": "백야 호텔 주방", "victim": "수석 셰프 김도현", "briefing": "주문표가 뒤바뀐 2분 동안 주방 출입 기록이 비었습니다. 범인은 맛을 아는 사람입니다."},
+]
+
+# Every case uses the same causal grammar, but the nouns and surface clues
+# change. This keeps the deduction legible for new players while ensuring the
+# case engine has twelve distinct shells to rotate through.
+CASE_TIMELINE = [
+    {"id": "approach", "time": "00:38", "title": "접근 기록", "detail": "잠금 장치가 12초 늦게 닫혔습니다. 누군가 현장에 들어온 흔적입니다.", "action_tag": "entry"},
+    {"id": "blindspot", "time": "00:39", "title": "기록 공백", "detail": "카메라가 47초 동안 검게 변했습니다. 그 사이 역할 능력이 사용됐을 가능성이 있습니다.", "action_tag": "blindspot"},
+    {"id": "attack", "time": "00:40", "title": "습격의 흔적", "detail": "피해자의 마지막 흔적과 공격 흔적이 겹칩니다. 마피아의 밤 행동과 대조하세요.", "action_tag": "attack"},
+    {"id": "alibi", "time": "00:41", "title": "알리바이 신호", "detail": "18초짜리 통화가 남았지만 발신자는 확인되지 않았습니다. 누군가의 알리바이가 만들어졌습니다.", "action_tag": "alibi"},
+    {"id": "lock", "time": "00:42", "title": "봉인된 현장", "detail": "비상등이 켜진 뒤 현장이 안쪽에서 잠겼습니다. 마지막 행동이 사건을 완성합니다.", "action_tag": "lock"},
 ]
 
 ROUND_EVENTS = [
@@ -217,7 +243,7 @@ class Room:
         self.name = name
         # Solo room codes are intentionally recognisable and server-enforced;
         # a copied solo link must not silently turn into a party lobby.
-        self.lobby_mode = "solo" if name.startswith("solo-") else "party"
+        self.lobby_mode = "first" if name.startswith("first-") else "solo" if name.startswith("solo-") else "party"
         self.players: dict[str, Player] = {}
         self.host_id: str | None = None
         self.phase = "lobby"
@@ -226,6 +252,7 @@ class Room:
         self.phase_started_at = time.time()
         self.winner: str | None = None
         self.mode = "party"
+        self.case_mode = "first" if self.lobby_mode == "first" else "classic"
         self.actions: dict[str, str] = {}
         self.votes: dict[str, str] = {}
         self.accused_id: str | None = None
@@ -247,8 +274,15 @@ class Room:
         self.speaker_deadline = 0.0
         self._speaker_index = -1
         self.last_death_id: str | None = None
-        self.pace = "quick"
+        self.pace = "first" if self.case_mode == "first" else "quick"
         self.case_profile = random.choice(CASE_PROFILES)
+        self.case_solution: dict[str, Any] = {}
+        self.case_grade = ""
+        self.case_badges: list[dict[str, str]] = []
+        self.final_highlights: list[dict[str, str]] = []
+        self.best_persuader: dict[str, str] | None = None
+        self.ai_memories: dict[str, list[dict[str, Any]]] = {}
+        self.ai_relationships: dict[str, dict[str, dict[str, Any]]] = {}
         self.reports: deque[dict[str, Any]] = deque(maxlen=100)
         self.private_leads: dict[str, dict[str, Any]] = {}
         self.public_leads: deque[dict[str, Any]] = deque(maxlen=18)
@@ -259,6 +293,7 @@ class Room:
         self.scene_submissions: dict[str, dict[str, Any]] = {}
         self.scene_results: dict[str, dict[str, Any]] = {}
         self.oaths: dict[str, dict[str, Any]] = {}
+        self.contracts: dict[str, dict[str, Any]] = {}
         self.ghost_echoes: deque[dict[str, Any]] = deque(maxlen=24)
         self.ghost_echo_marks: set[str] = set()
         self.director_beats: deque[dict[str, Any]] = deque(maxlen=12)
@@ -288,10 +323,11 @@ class Room:
         self._moment("director", f"{title} — {copy}")
 
     def _prepare_scene(self) -> None:
-        """Deal three evidence fragments to each player for the timeline puzzle."""
+        """Deal private evidence fragments from the selected causal timeline."""
         active = [p for p in self.players.values() if p.role != "spectator"]
+        fragments = self.case_solution.get("timeline") or SCENE_FRAGMENTS
         self.scene_fragments = {
-            player.id: random.sample(SCENE_FRAGMENTS, min(3, len(SCENE_FRAGMENTS)))
+            player.id: random.sample(fragments, min(3, len(fragments)))
             for player in active
         }
         self.scene_submissions.clear()
@@ -401,6 +437,40 @@ class Room:
                 "title": "자정의 생존자", "copy": "끝까지 사건의 결말을 지켜봤습니다.",
             })
         self.awards = awards[:4]
+
+    def _build_case_report(self) -> None:
+        """Turn the public trail into a compact, replayable case report."""
+        playable = [p for p in self.players.values() if p.role != "spectator"]
+        if not playable:
+            return
+        evidence_hits = sum(1 for result in self.scene_results.values() if result.get("score", 0) >= 67)
+        public_claims = len(self.claims)
+        correct_pressure = sum(
+            1 for target_id in self.pressure_marks.values()
+            if self.players.get(target_id) and self.players[target_id].role == "mafia"
+        )
+        score = min(100, 35 + evidence_hits * 12 + correct_pressure * 15 + min(public_claims, 5) * 4)
+        self.case_grade = "S" if score >= 86 else "A" if score >= 70 else "B" if score >= 52 else "C"
+        self.case_badges = []
+        if evidence_hits:
+            self.case_badges.append({"id": "timeline", "title": "시간의 복원자", "copy": "실제 행동 순서와 단서를 연결했습니다."})
+        if correct_pressure:
+            self.case_badges.append({"id": "red-thread", "title": "붉은 실 추적자", "copy": "압박 지목이 범인의 행동을 좁혔습니다."})
+        if self.case_mode == "first":
+            self.case_badges.append({"id": "first-case", "title": "첫 사건 완주", "copy": "짧은 사건의 전 과정을 끝까지 수사했습니다."})
+        if not self.case_badges:
+            self.case_badges.append({"id": "witness", "title": "침묵의 목격자", "copy": "사건 파일의 마지막 장면까지 살아남았습니다."})
+        persuasion = Counter(str(item.get("speaker_id")) for item in self.claims)
+        if persuasion:
+            pid, count = persuasion.most_common(1)[0]
+            player = self.players.get(pid)
+            if player:
+                self.best_persuader = {"player_id": pid, "player": player.nick, "copy": f"공식 진술 {count}개로 테이블의 시선을 움직였습니다."}
+        culprit = next((p for p in playable if p.role == "mafia"), None)
+        self.final_highlights = [
+            {"kind": "case", "title": "사건의 핵심", "copy": self.case_profile.get("briefing", "")},
+            {"kind": "culprit", "title": "범인의 연결 고리", "copy": f"{culprit.nick}님의 밤 행동과 습격 기록이 같은 시간대에 겹쳤습니다." if culprit else "범인의 행동 연결 고리를 복기하세요."},
+        ]
 
     def _add_forensic_clue(
         self,
@@ -592,6 +662,20 @@ class Room:
         if error:
             return error
         self._record("혼자 수사 모드 — AI 용의자 7명이 사건 파일에 등록되었습니다.")
+        self.case_mode = "classic"
+        return self.start(pid)
+
+    def first_start(self, pid: str) -> str | None:
+        """Start the guided 4-seat first case for a lone investigator."""
+        if self.phase != "lobby" or pid != self.host_id:
+            return "첫 사건은 대기실 방장만 시작할 수 있습니다."
+        if len(self.connected_players) != 1:
+            return "첫 사건은 혼자 수사 방에서 시작해 주세요."
+        error = self.fill_bots(pid, 4)
+        if error:
+            return error
+        self.case_mode = "first"
+        self._record("첫 사건 모드 — 진행관이 매 단계 설명하고, 4개의 역할만 사용합니다.")
         return self.start(pid)
 
     def remove_lobby_seat(self, pid: str, target_id: str) -> str | None:
@@ -618,7 +702,8 @@ class Room:
         if self.phase != "lobby" or pid != self.host_id:
             return "방장만 게임을 시작할 수 있습니다."
         active = self.lobby_seats
-        if len(active) < MIN_PLAYERS:
+        required_players = 4 if self.case_mode == "first" else MIN_PLAYERS
+        if len(active) < required_players:
             return f"최소 {MIN_PLAYERS}명이 필요합니다."
         not_ready = [p.nick for p in active if p.id != self.host_id and not p.ready and not p.is_bot]
         if not_ready:
@@ -627,8 +712,10 @@ class Room:
         # Disconnected lobby seats never enter the game.
         self.players = {p.id: p for p in active}
         self.mode = "solo" if sum(not p.is_bot for p in active) == 1 else "party"
-        mafia_count = 2 if len(active) >= 7 else 1
+        mafia_count = 1 if self.case_mode == "first" else (2 if len(active) >= 7 else 1)
         roles = ["mafia"] * mafia_count + ["doctor", "detective"]
+        if self.case_mode == "first":
+            roles += ["citizen"] * max(0, len(active) - len(roles))
         if len(active) >= 6:
             roles.append("trickster")
         if len(active) >= 9:
@@ -646,6 +733,16 @@ class Room:
             player.last_reaction_at = 0.0
         self.round = 1
         self.case_profile = random.choice(CASE_PROFILES)
+        timeline = []
+        for fragment in CASE_TIMELINE:
+            card = dict(fragment)
+            card["detail"] = f"{self.case_profile['location']} — {fragment['detail']}"
+            timeline.append(card)
+        self.case_solution = {
+            "timeline": timeline,
+            "order": [card["id"] for card in timeline],
+            "links": {"approach": "blindspot", "blindspot": "attack", "attack": "alibi", "alibi": "lock"},
+        }
         self.winner = None
         self.actions.clear()
         self.votes.clear()
@@ -669,11 +766,18 @@ class Room:
         self.scene_submissions.clear()
         self.scene_results.clear()
         self.oaths.clear()
+        self.contracts.clear()
         self.ghost_echoes.clear()
         self.ghost_echo_marks.clear()
         self.director_beats.clear()
         self.pressure_marks.clear()
         self.awards.clear()
+        self.case_grade = ""
+        self.case_badges.clear()
+        self.final_highlights.clear()
+        self.best_persuader = None
+        self.ai_memories = {player.id: [] for player in active if player.is_bot}
+        self.ai_relationships = {player.id: {} for player in active if player.is_bot}
         self.round_event = None
         self.reads.clear()
         self.wills.clear()
@@ -685,7 +789,9 @@ class Room:
         self._record(f"사건 {self.case_profile['code']} · {self.case_profile['title']}. 현장이 봉쇄되었습니다.")
         self._record(self.case_profile["briefing"])
         if self.mode == "solo":
-            self._record("혼자 수사 모드 — AI 용의자 7명이 각자의 기억과 의심을 들고 앉았습니다.")
+            self._record("혼자 수사 모드 — AI 용의자들이 각자의 기억과 관계를 들고 앉았습니다.")
+        if self.case_mode == "first":
+            self._record("진행관 안내 — 8~12분 첫 사건입니다. 각 단서의 행동 태그를 실제 역할과 대조하세요.")
         self._draw_round_event()
         self._prepare_scene()
         self._director_beat("사건 감독관", "각자 다른 기록 조각을 받았습니다. 기억을 봉인하고 현장 순서를 맞춰 보세요.", "blue")
@@ -731,6 +837,7 @@ class Room:
         self.scene_submissions.clear()
         self.scene_results.clear()
         self.oaths.clear()
+        self.contracts.clear()
         self.ghost_echoes.clear()
         self.ghost_echo_marks.clear()
         self.director_beats.clear()
@@ -1044,17 +1151,24 @@ class Room:
             return "받은 기록 조각을 두 개 이상, 중복 없이 선택해 주세요."
         if self.scene_submissions.get(pid, {}).get("round") == self.round:
             return "이번 라운드의 현장 재구성은 이미 제출했습니다."
-        positions = {fragment_id: index for index, fragment_id in enumerate(SCENE_ORDER)}
+        solution_order = self.case_solution.get("order") or SCENE_ORDER
+        positions = {fragment_id: index for index, fragment_id in enumerate(solution_order)}
         correct_pairs = sum(
             positions.get(left, -1) < positions.get(right, -1)
-            for left, right in zip(order, order[1:], strict=True)
+            for left, right in zip(order, order[1:])
         )
         total = max(1, len(order) - 1)
-        score = round(correct_pairs / total * 100)
+        # A valid adjacent link is a causal connection, not just an earlier
+        # timestamp. This makes the mini-game explain *why* the order works.
+        links = self.case_solution.get("links") or {}
+        causal_pairs = sum(1 for left, right in zip(order, order[1:]) if links.get(left) == right)
+        score = round((correct_pairs * 0.55 + causal_pairs * 0.45) / total * 100)
         self.scene_submissions[pid] = {"round": self.round, "order": order, "at": int(time.time() * 1000)}
         self.scene_results[pid] = {
             "round": self.round, "score": score, "total": total,
-            "correct_pairs": correct_pairs, "submitted_at": int(time.time() * 1000),
+            "correct_pairs": correct_pairs, "causal_pairs": causal_pairs,
+            "deduction": "접근 → 기록 공백 → 습격 → 알리바이 → 봉인 순서가 역할 행동과 연결됩니다." if causal_pairs else "첫 단서와 마지막 봉인의 연결을 다시 확인하세요.",
+            "submitted_at": int(time.time() * 1000),
         }
         self._record(f"{player.nick}님이 현장 타임라인을 제출했습니다. ({score}점)")
         self._moment("reconstruction", "현장 타임라인이 제출되었습니다.", actor=pid)
@@ -1077,6 +1191,39 @@ class Room:
         }
         self._record(f"{player.nick}님이 공개 맹세를 봉인했습니다.")
         self._moment("oath", "한 명의 공개 맹세가 봉인되었습니다.", actor=pid, target=target.id)
+        return None
+
+    def make_contract(self, pid: str, target_id: str, raw: str) -> str | None:
+        """Create a private one-line alliance that is revealed only to its pair."""
+        player = self.players.get(pid)
+        target = self.players.get(target_id)
+        text = " ".join(raw.strip().split())[:100]
+        if self.phase != "day" or not player or not player.alive:
+            return "낮 토론 중인 생존자만 비밀 계약을 제안할 수 있습니다."
+        if not target or not target.alive or target.id == pid or target.role == "spectator":
+            return "살아 있는 다른 용의자를 선택해 주세요."
+        if len(text) < 5:
+            return "계약 내용을 다섯 글자 이상 입력해 주세요."
+        self.contracts[pid] = {"id": secrets.token_hex(5), "owner_id": pid, "owner": player.nick, "target_id": target.id, "target": target.nick, "text": text, "round": self.round, "accepted": None}
+        self._record(f"{player.nick}님이 비밀 계약을 제안했습니다.")
+        self._moment("contract", "비밀 계약이 봉인되었습니다.", actor=pid, target=target.id)
+        if target.is_bot:
+            self.contracts[pid]["accepted"] = random.random() > 0.35
+            self._remember_ai(target, "비밀 계약 제안 수신", player, "trust" if self.contracts[pid]["accepted"] else "doubt")
+        return None
+
+    def respond_contract(self, pid: str, contract_id: str, accepted: bool) -> str | None:
+        contract = next((item for item in self.contracts.values() if item.get("id") == contract_id), None)
+        if not contract or contract.get("target_id") != pid:
+            return "응답할 비밀 계약이 없습니다."
+        if contract.get("round") != self.round or self.phase != "day":
+            return "현재 라운드에서만 계약에 응답할 수 있습니다."
+        contract["accepted"] = accepted
+        target = self.players.get(pid)
+        owner = self.players.get(str(contract.get("owner_id")))
+        if target and owner and owner.is_bot:
+            self._remember_ai(owner, "비밀 계약을 수락받음" if accepted else "비밀 계약을 거절당함", target, "trust" if accepted else "doubt")
+        self._record(f"비밀 계약 응답이 봉인되었습니다. ({'수락' if accepted else '거절'})")
         return None
 
     def ghost_echo(self, pid: str, raw: str) -> str | None:
@@ -1301,12 +1448,38 @@ class Room:
                 return persona
         return DEFAULT_BOT_PERSONA
 
+    def _remember_ai(self, bot: Player, event: str, target: Player | None = None, emotion: str = "neutral") -> None:
+        """Persist a small, inspectable memory so solo bots can reference history."""
+        if not bot.is_bot:
+            return
+        memories = self.ai_memories.setdefault(bot.id, [])
+        memories.append({"round": self.round, "event": event, "target_id": target.id if target else None, "target": target.nick if target else None, "emotion": emotion})
+        del memories[:-12]
+        if target:
+            relation = self.ai_relationships.setdefault(bot.id, {}).setdefault(target.id, {"trust": 0, "debt": 0, "emotion": "neutral", "betrayals": 0})
+            relation["emotion"] = emotion
+            relation["trust"] = max(-3, min(3, int(relation.get("trust", 0)) + (1 if emotion in {"trust", "relief"} else -1 if emotion in {"doubt", "anger"} else 0)))
+
+    def _ai_memory_line(self, bot: Player, target: Player | None) -> str | None:
+        if not target:
+            return None
+        memories = self.ai_memories.get(bot.id, [])
+        previous = next((item for item in reversed(memories) if item.get("target_id") == target.id), None)
+        if not previous:
+            return None
+        if previous.get("emotion") in {"doubt", "anger"}:
+            return f"{target.nick}님, 지난 라운드에 한 말({previous.get('event')})과 지금 알리바이가 달라요."
+        return f"지난 라운드에 {target.nick}님을 믿었지만, 이번 기록과 다시 대조하겠습니다."
+
     def _bot_target_score(self, bot: Player, target: Player) -> float:
         """Score public evidence so bot votes feel reasoned instead of random."""
         persona = self._bot_persona(bot)
         score = random.uniform(-0.35, 0.35) + float(persona["suspect_bias"])
         if self._bot_suspicions.get(bot.id) == target.id:
             score += 3.2
+        relation = self.ai_relationships.get(bot.id, {}).get(target.id, {})
+        score -= float(relation.get("trust", 0)) * 0.25
+        score += float(relation.get("betrayals", 0)) * 0.45
         if any(target.id in clue.get("suspect_ids", []) for clue in list(self.clues)[-3:]):
             score += 0.65
         if any(lead.get("suspect_id") == target.id for lead in list(self.public_leads)[-4:]):
@@ -1326,7 +1499,7 @@ class Room:
 
     def _bot_line(self, bot: Player, target: Player | None) -> str:
         persona = self._bot_persona(bot)
-        line = random.choice(persona["lines"])
+        line = self._ai_memory_line(bot, target) or random.choice(persona["lines"])
         if target and random.random() < 0.72:
             return f"{line} {target.nick}님, 이 부분부터 설명해 주세요."
         return line
@@ -1359,6 +1532,7 @@ class Room:
                     target = self._bot_choose_target(bot, candidates)
                 if target:
                     self._bot_suspicions[bot.id] = target.id
+                    self._remember_ai(bot, "공개 심문에서 의심 지목", target, "doubt")
                 line = self._bot_line(bot, target) if target else random.choice(BOT_LINES)
                 self.chat.append({"id": secrets.token_hex(4), "from": bot.nick, "from_id": bot.id, "text": line,
                                   "visibility": "all", "at": int(time.time() * 1000)})
@@ -1367,6 +1541,8 @@ class Room:
                         bot.id,
                         f"{target.nick}님의 발언과 사건 기록의 시간대가 맞는지 다시 확인해 보세요.",
                     )
+                if target and random.random() < 0.25:
+                    self._remember_ai(bot, "공개 약속을 지켜보는 중", target, "trust")
                 if not any(item["round"] == self.round and item["speaker_id"] == bot.id for item in self.claims):
                     claim = f"제 판단은 {target.nick}님을 우선 확인해야 한다는 것입니다." if target else line
                     self.claims.append({
@@ -1528,6 +1704,13 @@ class Room:
         for oath in self.oaths.values():
             if oath.get("round") == self.round and oath.get("owner_id") in self.votes:
                 oath["kept"] = self.votes.get(oath["owner_id"]) == oath.get("target_id")
+                owner = self.players.get(str(oath.get("owner_id")))
+                target = self.players.get(str(oath.get("target_id")))
+                if owner and owner.is_bot and target:
+                    self._remember_ai(owner, "공개 맹세를 지킴" if oath["kept"] else "공개 맹세를 어김", target, "relief" if oath["kept"] else "anger")
+                    if not oath["kept"]:
+                        relationship = self.ai_relationships.setdefault(owner.id, {}).setdefault(target.id, {"trust": 0, "debt": 0, "emotion": "anger", "betrayals": 0})
+                        relationship["betrayals"] = int(relationship.get("betrayals", 0)) + 1
         accused: Player | None = None
         if counts:
             ordered = counts.most_common()
@@ -1636,6 +1819,7 @@ class Room:
             if any(echo.get("owner_id") == p.id for echo in self.ghost_echoes):
                 p.score += 4
         self._build_awards()
+        self._build_case_report()
         self._set_phase("gameover", 0)
         if not any(player.coders_id is not None for player in self.players.values()):
             return
@@ -1775,6 +1959,15 @@ class Room:
             result.get("round") == self.round for result in self.scene_results.values()
         )
         current_oaths = [oath for oath in self.oaths.values() if oath.get("round") == self.round]
+        visible_contracts = [contract for contract in self.contracts.values() if contract.get("owner_id") == viewer.id or contract.get("target_id") == viewer.id]
+        ai_social = []
+        if self.mode == "solo" or self.case_mode == "first":
+            for bot in self.players.values():
+                if not bot.is_bot:
+                    continue
+                memories = self.ai_memories.get(bot.id, [])
+                relation = self.ai_relationships.get(bot.id, {}).get(viewer.id, {})
+                ai_social.append({"player_id": bot.id, "player": bot.nick, "persona": self._bot_persona(bot)["label"], "emotion": relation.get("emotion", "neutral"), "trust": int(relation.get("trust", 0)), "memory": memories[-1].get("event") if memories else "아직 당신에 대한 기억이 없습니다."})
         return {
             "t": "state",
             "room": self.name,
@@ -1794,6 +1987,8 @@ class Room:
                 "total": sum(player.alive and player.role != "spectator" for player in self.players.values()),
             },
             "oaths": current_oaths,
+            "contracts": visible_contracts,
+            "ai_social": ai_social,
             "ghost_echoes": list(self.ghost_echoes),
             "director_beats": list(self.director_beats)[-5:],
             "tips": list(self.tips)[-12:],
@@ -1803,6 +1998,11 @@ class Room:
             "winner": self.winner,
             "mode": self.mode,
             "lobby_mode": self.lobby_mode,
+            "case_mode": self.case_mode,
+            "case_grade": self.case_grade if self.phase == "gameover" else "",
+            "case_badges": list(self.case_badges) if self.phase == "gameover" else [],
+            "final_highlights": list(self.final_highlights) if self.phase == "gameover" else [],
+            "best_persuader": self.best_persuader if self.phase == "gameover" else None,
             "pace": self.pace,
             "host": self.host_id,
             "min_players": MIN_PLAYERS,

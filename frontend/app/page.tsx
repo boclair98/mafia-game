@@ -32,7 +32,7 @@ type InstallPromptEvent = Event & {
 
 type LocalStats = { games: number; wins: number; streak: number };
 type LegalPage = "terms" | "privacy" | "community";
-type JoinMode = "party" | "solo";
+type JoinMode = "party" | "solo" | "first";
 
 const PHASE_META = {
   lobby: ["용의자 대기실", "모두가 정체를 숨기면 자정의 사건이 시작됩니다."],
@@ -119,7 +119,7 @@ const LANDING_ROLES = [
 function makeRoom(mode: JoinMode = "party") {
   const left = ["silent", "black", "hidden", "last", "red"];
   const right = ["moon", "alley", "hotel", "signal", "midnight"];
-  const prefix = mode === "solo" ? "solo-" : "";
+  const prefix = mode === "first" ? "first-" : mode === "solo" ? "solo-" : "";
   return `${prefix}${left[Math.floor(Math.random() * left.length)]}-${right[Math.floor(Math.random() * right.length)]}-${Math.floor(100 + Math.random() * 900)}`;
 }
 
@@ -161,6 +161,8 @@ export default function GamePage() {
   const [sceneOrder, setSceneOrder] = useState<string[]>([]);
   const [oathTarget, setOathTarget] = useState<string | null>(null);
   const [oathText, setOathText] = useState("");
+  const [contractTarget, setContractTarget] = useState<string | null>(null);
+  const [contractText, setContractText] = useState("");
   const [ghostText, setGhostText] = useState("");
   const [notice, setNotice] = useState("");
   const [now, setNow] = useState(0);
@@ -230,7 +232,7 @@ export default function GamePage() {
     queueMicrotask(() => {
       if (!mounted) return;
       const requestedRoom = params.get("room") || "";
-      const requestedMode: JoinMode = params.get("mode") === "solo" || requestedRoom.startsWith("solo-") ? "solo" : "party";
+      const requestedMode: JoinMode = params.get("mode") === "first" || requestedRoom.startsWith("first-") ? "first" : params.get("mode") === "solo" || requestedRoom.startsWith("solo-") ? "solo" : "party";
       setJoinMode(requestedMode);
       setRoomInput(requestedRoom || makeRoom(requestedMode));
       setInvitedByLink(Boolean(requestedRoom));
@@ -540,7 +542,14 @@ export default function GamePage() {
             tips: next.tips ?? [],
             pressure_counts: next.pressure_counts ?? {},
             pressure_progress: next.pressure_progress ?? { completed: 0, total: 0, sealed: false },
-            awards: next.awards ?? [],
+             awards: next.awards ?? [],
+             case_mode: next.case_mode ?? (next.lobby_mode === "first" ? "first" : "classic"),
+             case_grade: next.case_grade ?? "",
+             case_badges: next.case_badges ?? [],
+             final_highlights: next.final_highlights ?? [],
+             best_persuader: next.best_persuader ?? null,
+             ai_social: next.ai_social ?? [],
+             contracts: next.contracts ?? [],
             accused_id: next.accused_id ?? null,
             judgement_counts: next.judgement_counts ?? { execute: 0, spare: 0 },
             ballot_feed: next.ballot_feed ?? [],
@@ -588,6 +597,8 @@ export default function GamePage() {
             setSceneOrder([]);
             setOathTarget(next.me.oath_target ?? null);
             setOathText("");
+            setContractTarget(null);
+            setContractText("");
             setGhostText("");
           }
           setSelected((current) => {
@@ -614,11 +625,11 @@ export default function GamePage() {
   // lobby, the host immediately asks the server to seat the AI cast and start
   // the case. Party rooms keep the ready/invite flow unchanged.
   useEffect(() => {
-    if (!joined || joinMode !== "solo" || !game || game.phase !== "lobby" || game.host !== game.me.id) return;
+    if (!joined || !["solo", "first"].includes(joinMode) || !game || game.phase !== "lobby" || game.host !== game.me.id) return;
     if (soloLaunchRef.current) return;
     soloLaunchRef.current = true;
     const timer = window.setTimeout(() => {
-      if (!socketRef.current?.send({ t: "solo_start" })) soloLaunchRef.current = false;
+      if (!socketRef.current?.send({ t: joinMode === "first" ? "first_start" : "solo_start" })) soloLaunchRef.current = false;
     }, 220);
     return () => window.clearTimeout(timer);
   }, [game?.host, game?.me.id, game?.phase, joined, joinMode]);
@@ -663,12 +674,13 @@ export default function GamePage() {
     event.preventDefault();
     const safeNick = nick.trim().slice(0, 16);
     let safeRoom = roomInput.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || makeRoom(joinMode);
+    if (joinMode === "first" && !safeRoom.startsWith("first-")) safeRoom = `first-${safeRoom}`.slice(0, 32);
     if (joinMode === "solo" && !safeRoom.startsWith("solo-")) safeRoom = `solo-${safeRoom}`.slice(0, 32);
     if (!safeNick || !termsAccepted) return;
     localStorage.setItem("black-midnight:terms-v1", "1");
     localStorage.setItem("black-midnight:nick", safeNick);
     const query = new URLSearchParams({ room: safeRoom });
-    if (joinMode === "solo") query.set("mode", "solo");
+    if (joinMode !== "party") query.set("mode", joinMode);
     history.replaceState(null, "", `?${query.toString()}`);
     soloLaunchRef.current = false;
     setNick(safeNick);
@@ -1013,6 +1025,13 @@ export default function GamePage() {
     setOathText("");
   };
 
+  const submitContract = (event: FormEvent) => {
+    event.preventDefault();
+    if (!contractTarget || contractText.trim().length < 5 || game?.contracts?.some((item) => item.owner_id === game.me.id && item.round === game.round)) return;
+    if (!send({ t: "contract", target: contractTarget, text: contractText.trim() })) return;
+    setContractText("");
+  };
+
   const submitGhostEcho = (event: FormEvent) => {
     event.preventDefault();
     const text = ghostText.trim();
@@ -1079,6 +1098,7 @@ export default function GamePage() {
             <div className="campaign-actions">
               <button className="campaign-primary" type="button" onClick={() => focusJoinCard(invitedByLink ? joinMode : "party")}><span>{invitedByLink ? "초대받은 사건에 합류" : "친구와 함께 사건 시작"}</span><ChevronRight size={19} /></button>
               <button className="campaign-secondary campaign-solo" type="button" onClick={() => focusJoinCard("solo")}><Bot size={17} />혼자 수사 · AI 7명</button>
+              <button className="campaign-secondary campaign-first" type="button" onClick={() => focusJoinCard("first")}><BookOpen size={17} />첫 사건 · 8–12분</button>
               <button className="campaign-secondary" type="button" onClick={() => focusJoinCard("party")}><Users size={17} />친구 방 코드로 합류</button>
             </div>
             <div className="campaign-proof"><span><Check size={12} />설치 없이 시작</span><span><Mic size={12} />실시간 음성</span><span><Users size={12} />4–12인 추리</span></div>
@@ -1115,23 +1135,24 @@ export default function GamePage() {
             <div className="join-card-top"><span>PRIVATE CASE TABLE</span><span className="live-dot">온라인</span></div>
             {invitedByLink && <div className="invited-room"><UserPlus size={15} /><span><b>비밀 초대장이 도착했습니다</b><small>{roomInput} 사건의 자리가 확보되어 있습니다.</small></span></div>}
             <div className="join-object-seal" aria-hidden="true"><LockKeyhole size={24} /><span>SEALED</span></div>
-            <h2 id="join-gate-title">{invitedByLink ? "수사 초대에 응답" : joinMode === "solo" ? "혼자 수사 방 만들기" : "친구와 함께 방 만들기"}</h2>
-            <p>{joinMode === "solo" ? "AI 용의자 7명이 자동으로 합류합니다. 이름을 입력하면 바로 첫 번째 밤이 시작됩니다." : "수사에서 사용할 이름을 정하세요. 친구에게 방 코드를 공유하면 함께 사건에 합류할 수 있습니다."}</p>
+            <h2 id="join-gate-title">{invitedByLink ? "수사 초대에 응답" : joinMode === "first" ? "첫 사건 브리핑 시작" : joinMode === "solo" ? "혼자 수사 방 만들기" : "친구와 함께 방 만들기"}</h2>
+            <p>{joinMode === "first" ? "4개의 역할과 진행관 설명으로 8~12분 안에 첫 사건을 완주합니다." : joinMode === "solo" ? "AI 용의자 7명이 자동으로 합류합니다. 이름을 입력하면 바로 첫 번째 밤이 시작됩니다." : "수사에서 사용할 이름을 정하세요. 친구에게 방 코드를 공유하면 함께 사건에 합류할 수 있습니다."}</p>
             {!invitedByLink && <div className="join-mode-picker" aria-label="플레이 방식 선택">
               <button type="button" className={joinMode === "party" ? "active" : ""} onClick={() => chooseJoinMode("party")}><Users size={17} /><span><b>친구와 함께</b><small>4–12인 · 초대 링크</small></span></button>
               <button type="button" className={joinMode === "solo" ? "active solo" : ""} onClick={() => chooseJoinMode("solo")}><Bot size={17} /><span><b>혼자 수사</b><small>AI 7명 · 즉시 시작</small></span></button>
+              <button type="button" className={joinMode === "first" ? "active first" : ""} onClick={() => chooseJoinMode("first")}><BookOpen size={17} /><span><b>첫 사건</b><small>4인 · 8–12분 · 튜토리얼</small></span></button>
             </div>}
-            <div className="join-steps"><span className="active"><b>01</b>이름 설정</span><i /><span><b>{joinMode === "solo" ? "02" : "02"}</b>{joinMode === "solo" ? "AI 합류" : "친구 합류"}</span><i /><span><b>03</b>역할 봉인</span></div>
+            <div className="join-steps"><span className="active"><b>01</b>이름 설정</span><i /><span><b>02</b>{joinMode === "first" ? "진행관 브리핑" : joinMode === "solo" ? "AI 합류" : "친구 합류"}</span><i /><span><b>03</b>역할 봉인</span></div>
             <div className="join-warning"><Skull size={14} /><span>아무도 믿지 마세요. 목소리도 단서가 됩니다.</span></div>
             <form onSubmit={submitJoin}>
               <label><span>당신의 이름 <em>{nick.length}/16</em></span><input id="landing-nick" value={nick} onChange={(e) => setNick(e.target.value)} placeholder="게임에서 불릴 이름" maxLength={16} /></label>
-              <label><span>비밀 방 코드 <em>{invitedByLink ? "초대 링크에서 확인됨" : joinMode === "solo" ? "혼자 수사 전용 코드" : "친구와 공유할 코드"}</em></span><div className="room-field"><input value={roomInput} onChange={(e) => { setRoomInput(e.target.value); setInvitedByLink(false); }} maxLength={32} /><button type="button" onClick={() => { setRoomInput(makeRoom(joinMode)); setInvitedByLink(false); }} aria-label="새 방 코드 만들기"><RotateCcw size={15} /></button></div></label>
+              <label><span>비밀 방 코드 <em>{invitedByLink ? "초대 링크에서 확인됨" : joinMode === "first" ? "첫 사건 전용 코드" : joinMode === "solo" ? "혼자 수사 전용 코드" : "친구와 공유할 코드"}</em></span><div className="room-field"><input value={roomInput} onChange={(e) => { setRoomInput(e.target.value); setInvitedByLink(false); }} maxLength={32} /><button type="button" onClick={() => { setRoomInput(makeRoom(joinMode)); setInvitedByLink(false); }} aria-label="새 방 코드 만들기"><RotateCcw size={15} /></button></div></label>
               <label className="terms-check"><input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span><b>커뮤니티 규칙과 이용약관에 동의합니다</b><small><button type="button" onClick={() => setLegalPage("terms")}>이용약관</button> · <button type="button" onClick={() => setLegalPage("community")}>커뮤니티 가이드</button> · <button type="button" onClick={() => setLegalPage("privacy")}>개인정보</button></small></span></label>
-              <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim() || !termsAccepted}><LogIn size={18} /><span>{!termsAccepted ? "규칙에 동의하고 입장" : joinMode === "solo" ? "AI 용의자 7명과 즉시 시작" : nick.trim() ? `${nick.trim()}님으로 수사 합류` : "이름을 입력하고 수사 합류"}</span><ChevronRight size={16} /></button>
+              <button className="primary-button join-enter-button" type="submit" disabled={!nick.trim() || !termsAccepted}><LogIn size={18} /><span>{!termsAccepted ? "규칙에 동의하고 입장" : joinMode === "first" ? "첫 사건 시작" : joinMode === "solo" ? "AI 용의자 7명과 즉시 시작" : nick.trim() ? `${nick.trim()}님으로 수사 합류` : "이름을 입력하고 수사 합류"}</span><ChevronRight size={16} /></button>
             </form>
             {installPrompt && <button className="install-button" type="button" onClick={installApp}><Smartphone size={16} /> 홈 화면에 앱 설치</button>}
             <div className="join-proof"><span><Check size={12} />설치 없음</span><span><Check size={12} />AI 인원 채우기</span><span><Check size={12} />실시간 음성</span></div>
-            <div className="join-foot">{joinMode === "solo" ? <><Bot size={15} /> AI 용의자 7명 · 혼자서도 완결되는 사건 · 초보자 브리핑 제공</> : <><Users size={15} /> 최소 4명부터 시작 · 최대 12명 · 초보자 브리핑 제공</>}</div>
+             <div className="join-foot">{joinMode === "first" ? <><BookOpen size={15} /> 4인 역할 · 실제 추리형 타임라인 · 진행관 안내</> : joinMode === "solo" ? <><Bot size={15} /> AI 용의자 7명 · 혼자서도 완결되는 사건 · 초보자 브리핑 제공</> : <><Users size={15} /> 최소 4명부터 시작 · 최대 12명 · 초보자 브리핑 제공</>}</div>
           </section>
         </div>}
         {tutorialOpen && <TutorialModal step={tutorialStep} setStep={setTutorialStep} onClose={closeTutorial} />}
@@ -1220,7 +1241,7 @@ export default function GamePage() {
       <section className="phase-banner">
         <div className="scene-vignette" aria-hidden="true"><i /><span /></div>
         <div className="threat-monitor"><div><Siren size={14} /><span>CITY THREAT</span><b>{cityThreat}%</b></div><div className="threat-bar"><i style={{ width: `${cityThreat}%` }} /></div><small>{aliveCount} ALIVE · {lostCount} LOST</small></div>
-        <div className="phase-kicker">{game.mode === "solo" ? "SOLO CASE · " : ""}{game.case_profile.code} · {game.case_profile.location} · {game.round ? `DAY ${game.round}` : "WAITING ROOM"}</div>
+        <div className="phase-kicker">{game.case_mode === "first" ? "FIRST CASE · GUIDED 4-SEAT · " : game.mode === "solo" ? "SOLO CASE · " : ""}{game.case_profile.code} · {game.case_profile.location} · {game.round ? `DAY ${game.round}` : "WAITING ROOM"}</div>
         <h1>{phase[0]}</h1>
         <p><b>{game.case_profile.title}</b><span>{phase[1]}</span></p>
         <div className="phase-now" aria-live="polite"><i /><b>{PHASE_ALERT_META[game.phase].title}</b><span>{remaining > 0 ? `${remaining}초 남음` : game.phase === "lobby" ? "시작 대기 중" : "진행 중"}</span></div>
@@ -1239,6 +1260,7 @@ export default function GamePage() {
         <section className="table-panel">
           <div className="panel-heading"><div><span>{game.phase === "lobby" ? "SUSPECT FILES" : "THE TABLE"}</span><h2>{game.phase === "lobby" ? "용의자 명단" : "참가자"}</h2></div><div>{game.players.filter((p) => p.alive).length} 생존</div></div>
           {caseNarrative && activeChapter && <NarrativeSceneCard game={game} narrative={caseNarrative} chapter={activeChapter} narrativeLine={narrativeLine} />}
+          {game.phase === "lobby" && game.lobby_mode === "first" && humanCount === 1 && game.host === game.me.id && <section className="solo-mode-card first-case-card"><div className="solo-mode-icon"><BookOpen size={22} /></div><div><small>FIRST CASE · GUIDED 4-SEAT</small><b>첫 사건: 8~12분 추리 튜토리얼</b><p>마피아·의사·탐정·시민만 등장합니다. 진행관이 매 단계 설명하고, 단서 순서를 실제 행동과 연결합니다.</p></div><button type="button" onClick={() => send({ t: "first_start" })}><Sparkles size={15} />첫 사건 시작</button></section>}
           {game.phase === "lobby" && game.lobby_mode === "solo" && humanCount === 1 && game.host === game.me.id && <section className="solo-mode-card"><div className="solo-mode-icon"><Bot size={22} /></div><div><small>SOLO CASE MODE · AI CAST</small><b>혼자서도 한 편의 사건을 시작하세요</b><p>이 방은 혼자 수사 전용입니다. 7명의 AI 용의자가 자동으로 합류한 뒤 사건이 시작됩니다.</p></div><button type="button" onClick={() => send({ t: "solo_start" })}><Sparkles size={15} />혼자 사건 시작</button></section>}
           {game.round_event && game.phase !== "lobby" && (
             <section className={`round-event-card event-${game.round_event.id}`}>
@@ -1251,6 +1273,7 @@ export default function GamePage() {
           {game.phase === "reveal" && <MemorySealCard game={game} text={memoryText} setText={setMemoryText} onSubmit={submitMemory} />}
           {["dawn", "day", "vote"].includes(game.phase) && <SceneReconstructionCard game={game} order={sceneOrder} setOrder={setSceneOrder} onSubmit={submitScene} />}
           {game.phase === "day" && <OathCard game={game} target={oathTarget} setTarget={setOathTarget} text={oathText} setText={setOathText} onSubmit={submitOath} />}
+          {game.phase === "day" && <ContractCard game={game} target={contractTarget} setTarget={setContractTarget} text={contractText} setText={setContractText} onSubmit={submitContract} onResponse={(contractId, accepted) => send({ t: "contract_response", contract_id: contractId, accepted })} />}
           {!game.me.alive && !["spectator", "mafia"].includes(role) && <AfterlifePanel game={game} onPredict={(target) => send({ t: "ghost_predict", target })} ghostText={ghostText} setGhostText={setGhostText} onEcho={submitGhostEcho} />}
           {accusedPlayer && ["defense", "verdict"].includes(game.phase) && (
             <div className={`trial-stage trial-${game.phase}`}>
@@ -1313,6 +1336,7 @@ export default function GamePage() {
           {game.phase === "gameover" && game.awards.length > 0 && (
             <section className="case-awards"><header><Award size={18} /><span><b>자정의 사건 훈장</b><small>이번 판에서 만들어진 플레이 스타일 기록</small></span></header><div>{game.awards.map((award) => <article key={award.id}><Award size={20} /><span><small>{award.title}</small><b>{award.player}</b><p>{award.copy}</p></span></article>)}</div></section>
           )}
+          {game.phase === "gameover" && <CaseReportPanel game={game} />}
           <div className="reaction-layer" aria-live="polite">{game.reactions.map((reaction, index) => <div key={reaction.id} style={{ left: `${12 + (index * 17) % 74}%`, animationDelay: `${(index % 3) * .08}s` }}><b>{reaction.emoji}</b><span>{reaction.from}</span></div>)}</div>
           <div className="player-grid">
             {game.players.map((player, index) => {
@@ -1336,6 +1360,7 @@ export default function GamePage() {
                 {game.host === game.me.id && <div className="bot-fill-switch"><Bot size={14} /><span>AI 인원</span>{[4, 6, 8].map((target) => <button key={target} className={game.players.length === target ? "active" : ""} onClick={() => send({ t: "fill_bots", target })}>{target}</button>)}</div>}
                 <button className="secondary-button" onClick={() => setInviteOpen(true)}><UserPlus size={17} />친구 초대</button>
                 {game.host !== game.me.id && <button className="secondary-button" onClick={() => send({ t: "ready" })}>{me?.ready ? <Check size={17} /> : <ShieldQuestion size={17} />}{me?.ready ? "준비 취소" : "준비하기"}</button>}
+                {game.host === game.me.id && game.lobby_mode === "first" && humanCount === 1 && <button className="secondary-button solo-start-button" onClick={() => send({ t: "first_start" })}><BookOpen size={17} />첫 사건 시작</button>}
                 {game.host === game.me.id && game.lobby_mode === "solo" && humanCount === 1 && <button className="secondary-button solo-start-button" onClick={() => send({ t: "solo_start" })}><Bot size={17} />혼자 사건 시작</button>}
                 {game.host === game.me.id && <button className="primary-button compact start-game-button" disabled={game.players.length < game.min_players || unreadyPlayers.length > 0} onClick={() => send({ t: "start" })}><Skull size={17} /><span>{unreadyPlayers.length ? `${unreadyPlayers.length}명 준비 대기` : "게임 시작"}</span></button>}
               </>
@@ -1360,7 +1385,8 @@ export default function GamePage() {
             <div className="story-card-head"><div className="panel-label">CASE INVESTIGATION</div><button onClick={() => setCaseOpen(true)}><BookOpen size={13} />전체 기록</button></div>
             {caseNarrative && activeChapter && <NarrativeRail game={game} narrative={caseNarrative} chapter={activeChapter} />}
             <div className="ai-director"><div><Radio size={14} /><b>현장 지휘실 · 다음 수사</b><i /></div><p>{game.guide}</p></div>
-            {game.director_beats.length > 0 && <DirectorBeatCard beats={game.director_beats} />}
+             {game.director_beats.length > 0 && <DirectorBeatCard beats={game.director_beats} />}
+             {(game.mode === "solo" || game.case_mode === "first") && game.ai_social && <AISocialPanel entries={game.ai_social} />}
             <div className="forensic-board">
               <header><Search size={14} /><span><b>현장 감식 단서</b><small>{game.clues.length ? `${game.clues.length}개 확보 · 범인을 포함한 후보군` : "첫 번째 사건 보고를 기다리는 중"}</small></span></header>
               {game.clues.length ? <div>{game.clues.slice(-3).reverse().map((clue) => <article key={clue.id}><span>{clue.code}</span><b>{clue.title}</b><p>{clue.detail}</p><small>{clue.outcome} · DAY {clue.round}</small></article>)}</div> : <p className="forensic-empty">밤의 습격이 발생하면 감식반이 범인을 포함한 용의자 묶음을 공개합니다.</p>}
@@ -1386,7 +1412,7 @@ export default function GamePage() {
       </div>
       <div className={`mobile-command-dock command-${game.phase}`}>
         <span><small>{game.phase === "night" ? "NIGHT ORDER" : game.phase === "vote" ? "SEALED BALLOT" : game.phase === "verdict" ? "FINAL VERDICT" : "CURRENT OBJECTIVE"}</small><b>{remaining > 0 ? `${remaining}초 · ` : ""}{currentDirective}</b></span>
-        {game.phase === "lobby" && game.host === game.me.id && game.lobby_mode === "solo" && humanCount === 1 ? <button className="primary solo-dock-button" onClick={() => send({ t: "solo_start" })}><Bot size={15} />혼자 사건 시작</button> : game.phase === "lobby" && game.host === game.me.id && <button className="primary" disabled={game.players.length >= game.min_players && unreadyPlayers.length > 0} onClick={() => game.players.length < game.min_players ? send({ t: "fill_bots", target: game.min_players }) : send({ t: "start" })}>{game.players.length < game.min_players ? `AI ${game.min_players}명 채우기` : unreadyPlayers.length ? "준비 대기" : "게임 시작"}</button>}
+        {game.phase === "lobby" && game.host === game.me.id && game.lobby_mode === "first" && humanCount === 1 ? <button className="primary solo-dock-button" onClick={() => send({ t: "first_start" })}><BookOpen size={15} />첫 사건 시작</button> : game.phase === "lobby" && game.host === game.me.id && game.lobby_mode === "solo" && humanCount === 1 ? <button className="primary solo-dock-button" onClick={() => send({ t: "solo_start" })}><Bot size={15} />혼자 사건 시작</button> : game.phase === "lobby" && game.host === game.me.id && <button className="primary" disabled={game.players.length >= game.min_players && unreadyPlayers.length > 0} onClick={() => game.players.length < game.min_players ? send({ t: "fill_bots", target: game.min_players }) : send({ t: "start" })}>{game.players.length < game.min_players ? `AI ${game.min_players}명 채우기` : unreadyPlayers.length ? "준비 대기" : "게임 시작"}</button>}
         {game.phase === "lobby" && game.host !== game.me.id && <button className={me?.ready ? "" : "primary"} onClick={() => send({ t: "ready" })}>{me?.ready ? "준비 취소" : "준비하기"}</button>}
         {game.phase === "night" && game.me.alive && ["mafia", "doctor", "detective", "bodyguard"].includes(role) && <button className="primary" onClick={() => selected ? commitDecision("action") : setMobileTab("suspects")}>{selected ? "명령 봉인" : "대상 선택"}</button>}
         {game.phase === "vote" && game.me.alive && <button className="danger" onClick={() => selected ? commitDecision("vote") : setMobileTab("suspects")}>{selected ? "표 봉인" : "용의자 선택"}</button>}
@@ -1549,12 +1575,28 @@ function MemorySealCard({ game, text, setText, onSubmit }: { game: GameState; te
 
 function SceneReconstructionCard({ game, order, setOrder, onSubmit }: { game: GameState; order: string[]; setOrder: (value: string[]) => void; onSubmit: () => void }) {
   const toggle = (id: string) => setOrder(order.includes(id) ? order.filter((item) => item !== id) : [...order, id]);
-  return <section className="scene-reconstruction-card"><header><Search size={17} /><span><small>CRIME SCENE RECONSTRUCTION · ROUND {game.round}</small><b>현장 타임라인 복원</b></span><em>{game.scene_progress.completed}/{game.scene_progress.total} 제출</em></header><p>당신에게만 보이는 기록 조각을 시간순으로 배열하세요. 다른 사람의 순서와 다를수록 토론의 새 단서가 됩니다.</p><div className="scene-fragment-grid">{game.me.scene_fragments.map((fragment) => <button type="button" key={fragment.id} className={order.includes(fragment.id) ? "picked" : ""} onClick={() => toggle(fragment.id)}><small>{fragment.time}</small><b>{fragment.title}</b><span>{fragment.detail}</span>{order.includes(fragment.id) && <i>{order.indexOf(fragment.id) + 1}</i>}</button>)}</div><footer>{game.me.scene_result ? <span className="scene-result"><Check size={14} />내 재구성 {game.me.scene_result.score}점 · {game.me.scene_result.correct_pairs}/{game.me.scene_result.total} 연결 성공</span> : <><span>{order.length}개 조각 선택</span><button type="button" disabled={!game.me.can_reconstruct || order.length < 2} onClick={onSubmit}><LockKeyhole size={14} />타임라인 제출</button></>}</footer></section>;
+  return <section className="scene-reconstruction-card"><header><Search size={17} /><span><small>CAUSAL TIMELINE · ROUND {game.round}</small><b>현장 타임라인 복원</b></span><em>{game.scene_progress.completed}/{game.scene_progress.total} 제출</em></header><p>시간순만 맞히는 퍼즐이 아닙니다. 접근 → 기록 공백 → 습격 → 알리바이 → 봉인처럼 실제 역할 행동이 이어지는 원인을 찾아보세요.</p><div className="scene-fragment-grid">{game.me.scene_fragments.map((fragment) => <button type="button" key={fragment.id} className={order.includes(fragment.id) ? "picked" : ""} onClick={() => toggle(fragment.id)}><small>{fragment.time}</small><b>{fragment.title}</b><span>{fragment.detail}</span>{order.includes(fragment.id) && <i>{order.indexOf(fragment.id) + 1}</i>}</button>)}</div><footer>{game.me.scene_result ? <span className="scene-result"><Check size={14} />내 재구성 {game.me.scene_result.score}점 · {game.me.scene_result.correct_pairs}/{game.me.scene_result.total} 시간 연결{game.me.scene_result.deduction && <small>{game.me.scene_result.deduction}</small>}</span> : <><span>{order.length}개 조각 선택</span><button type="button" disabled={!game.me.can_reconstruct || order.length < 2} onClick={onSubmit}><LockKeyhole size={14} />타임라인 제출</button></>}</footer></section>;
 }
 
 function OathCard({ game, target, setTarget, text, setText, onSubmit }: { game: GameState; target: string | null; setTarget: (value: string | null) => void; text: string; setText: (value: string) => void; onSubmit: (event: FormEvent) => void }) {
   const candidates = game.players.filter((player) => player.alive && player.id !== game.me.id && player.role !== "spectator");
   return <section className="oath-card"><header><ShieldCheck size={17} /><span><small>PUBLIC OATH · ROUND {game.round}</small><b>말을 맹세로 바꾸기</b></span><em>{game.oaths.length}개 봉인</em></header><p>투표 전에 누구를 지목할지 공개적으로 약속하세요. 실제 표와 비교되어 다음 판 점수에 반영됩니다.</p>{game.oaths.length > 0 && <div className="oath-feed">{game.oaths.slice(-3).map((oath) => <article key={oath.id}><b>{oath.owner}</b><span>→ {oath.target}</span><p>{oath.text}</p>{oath.kept !== null && <small>{oath.kept ? "약속을 지킴" : "약속을 어김"}</small>}</article>)}</div>}{game.me.can_oath ? <form onSubmit={onSubmit}><select value={target ?? ""} onChange={(event) => setTarget(event.target.value || null)}><option value="">지목할 용의자 선택</option>{candidates.map((player) => <option key={player.id} value={player.id}>{player.n}</option>)}</select><input value={text} onChange={(event) => setText(event.target.value)} maxLength={100} placeholder="예: 다음 투표에서 이 사람의 알리바이를 확인하겠습니다" /><button disabled={!target}><LockKeyhole size={14} />맹세 봉인</button></form> : <small className="oath-locked">이번 낮의 맹세는 이미 봉인되었거나 참여할 수 없습니다.</small>}</section>;
+}
+
+function ContractCard({ game, target, setTarget, text, setText, onSubmit, onResponse }: { game: GameState; target: string | null; setTarget: (value: string | null) => void; text: string; setText: (value: string) => void; onSubmit: (event: FormEvent) => void; onResponse: (contractId: string, accepted: boolean) => void }) {
+  const candidates = game.players.filter((player) => player.alive && player.id !== game.me.id && player.role !== "spectator");
+  const mine = game.contracts?.find((contract) => contract.owner_id === game.me.id && contract.round === game.round);
+  const incoming = game.contracts?.find((contract) => contract.target_id === game.me.id && contract.round === game.round && contract.accepted === null);
+  return <section className="contract-card"><header><LockKeyhole size={17} /><span><small>SECRET CONTRACT · ROUND {game.round}</small><b>둘만 아는 약속</b></span><em>{game.contracts?.filter((contract) => contract.round === game.round).length ?? 0}개</em></header><p>상대에게만 보이는 한 줄 계약입니다. 지켜지면 신뢰가 쌓이고, 배신은 AI와 다음 판 관계에 남습니다.</p>{incoming && <div className="contract-incoming"><b>{incoming.owner}님의 제안</b><span>{incoming.text}</span><div><button type="button" onClick={() => onResponse(incoming.id, true)}><Check size={13} />수락</button><button type="button" onClick={() => onResponse(incoming.id, false)}>거절</button></div></div>}{mine ? <div className="contract-sealed"><Check size={14} />{mine.target}님에게 계약이 전달되었습니다. 응답: {mine.accepted === null ? "대기 중" : mine.accepted ? "수락" : "거절"}</div> : !incoming && <form onSubmit={onSubmit}><select value={target ?? ""} onChange={(event) => setTarget(event.target.value || null)}><option value="">계약 상대 선택</option>{candidates.map((player) => <option key={player.id} value={player.id}>{player.n}</option>)}</select><input value={text} onChange={(event) => setText(event.target.value)} maxLength={100} placeholder="예: 이번 밤 서로를 지키고 아침에 기록을 비교하자" /><button disabled={!target || text.trim().length < 5}><LockKeyhole size={14} />계약 봉인</button></form>}</section>;
+}
+
+function AISocialPanel({ entries }: { entries: NonNullable<GameState["ai_social"]> }) {
+  return <section className="ai-social-panel"><header><Bot size={16} /><span><b>AI 용의자 관계 기록</b><small>이전 발언과 감정이 다음 판단에 반영됩니다.</small></span></header><div>{entries.slice(0, 4).map((entry) => <article key={entry.player_id}><div className={`ai-emotion emotion-${entry.emotion}`}><i /></div><span><b>{entry.player}</b><small>{entry.persona} · 신뢰 {entry.trust > 0 ? "+" : ""}{entry.trust}</small><p>{entry.memory}</p></span></article>)}</div></section>;
+}
+
+function CaseReportPanel({ game }: { game: GameState }) {
+  const grade = game.case_grade || "B";
+  return <section className="case-report-panel"><header><Trophy size={18} /><span><b>CASE REPORT · {grade} GRADE</b><small>이번 판의 추리 연결과 사회적 흔적</small></span><strong>{grade}</strong></header>{game.best_persuader && <div className="report-persuader"><MessageCircle size={15} /><span><small>가장 설득력 있었던 사람</small><b>{game.best_persuader.player}</b><p>{game.best_persuader.copy}</p></span></div>}<div className="report-badges">{(game.case_badges ?? []).map((badge) => <article key={badge.id}><Award size={14} /><span><b>{badge.title}</b><small>{badge.copy}</small></span></article>)}</div><div className="report-highlights">{(game.final_highlights ?? []).map((highlight) => <p key={`${highlight.kind}-${highlight.title}`}><b>{highlight.title}</b><span>{highlight.copy}</span></p>)}</div></section>;
 }
 
 function DirectorBeatCard({ beats }: { beats: GameState["director_beats"] }) {

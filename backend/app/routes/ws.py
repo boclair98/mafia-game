@@ -53,7 +53,7 @@ async def game_socket(
     ):
         await ws.close(code=4004, reason="room_full")
         return
-    if arena.phase == "lobby" and arena.lobby_mode == "solo" and arena.connected_players and not any(
+    if arena.phase == "lobby" and arena.lobby_mode in {"solo", "first"} and arena.connected_players and not any(
         p.key == player_key for p in arena.players.values()
     ):
         await ws.close(code=4005, reason="solo_room")
@@ -96,6 +96,8 @@ async def game_socket(
                     error = arena.fill_bots(player.id, target)
                 case "solo_start":
                     error = arena.solo_start(player.id)
+                case "first_start":
+                    error = arena.first_start(player.id)
                 case "remove_seat":
                     error = arena.remove_lobby_seat(player.id, str(msg.get("target", "")))
                 case "start":
@@ -132,6 +134,18 @@ async def game_socket(
                         player.id,
                         str(msg.get("target", "")),
                         str(msg.get("text", "")),
+                    )
+                case "contract":
+                    error = arena.make_contract(
+                        player.id,
+                        str(msg.get("target", "")),
+                        str(msg.get("text", "")),
+                    )
+                case "contract_response":
+                    error = arena.respond_contract(
+                        player.id,
+                        str(msg.get("contract_id", "")),
+                        bool(msg.get("accepted", False)),
                     )
                 case "ghost_echo":
                     error = arena.ghost_echo(player.id, str(msg.get("text", "")))
