@@ -292,6 +292,11 @@ class Room:
         self.scene_fragments: dict[str, list[dict[str, Any]]] = {}
         self.scene_submissions: dict[str, dict[str, Any]] = {}
         self.scene_results: dict[str, dict[str, Any]] = {}
+        # Publicly visible hypotheses that bind a suspect, a forensic clue,
+        # and one private timeline fragment.  The hidden link evaluation is
+        # intentionally kept server-side until the case is closed.
+        self.theories: dict[str, dict[str, Any]] = {}
+        self.theory_stakes: dict[str, int] = {}
         self.oaths: dict[str, dict[str, Any]] = {}
         self.contracts: dict[str, dict[str, Any]] = {}
         self.ghost_echoes: deque[dict[str, Any]] = deque(maxlen=24)
@@ -430,6 +435,20 @@ class Room:
                     "title": "붉은 실의 주인", "copy": f"긴급 지목으로 범인을 {count}번 정확히 압박했습니다.",
                 })
 
+        confirmed_theories = Counter(
+            str(theory.get("owner_id"))
+            for theory in self.theories.values()
+            if theory.get("status") == "confirmed"
+        )
+        if confirmed_theories:
+            pid, count = confirmed_theories.most_common(1)[0]
+            player = self.players.get(pid)
+            if player:
+                awards.append({
+                    "id": "chain-link", "player_id": pid, "player": player.nick,
+                    "title": "인과 고리 설계자", "copy": f"용의자·단서·시간을 {count}번 모두 연결했습니다.",
+                })
+
         if not awards and playable:
             survivor = next((p for p in playable if p.alive), playable[0])
             awards.append({
@@ -444,16 +463,20 @@ class Room:
         if not playable:
             return
         evidence_hits = sum(1 for result in self.scene_results.values() if result.get("score", 0) >= 67)
+        confirmed_theories = sum(1 for theory in self.theories.values() if theory.get("status") == "confirmed")
+        partial_theories = sum(1 for theory in self.theories.values() if theory.get("status") == "partial")
         public_claims = len(self.claims)
         correct_pressure = sum(
             1 for target_id in self.pressure_marks.values()
             if self.players.get(target_id) and self.players[target_id].role == "mafia"
         )
-        score = min(100, 35 + evidence_hits * 12 + correct_pressure * 15 + min(public_claims, 5) * 4)
+        score = min(100, 35 + evidence_hits * 12 + confirmed_theories * 10 + partial_theories * 3 + correct_pressure * 15 + min(public_claims, 5) * 4)
         self.case_grade = "S" if score >= 86 else "A" if score >= 70 else "B" if score >= 52 else "C"
         self.case_badges = []
         if evidence_hits:
             self.case_badges.append({"id": "timeline", "title": "시간의 복원자", "copy": "실제 행동 순서와 단서를 연결했습니다."})
+        if confirmed_theories:
+            self.case_badges.append({"id": "chain-link", "title": "인과 고리 설계자", "copy": f"봉인된 가설 {confirmed_theories}개가 실제 사건과 일치했습니다."})
         if correct_pressure:
             self.case_badges.append({"id": "red-thread", "title": "붉은 실 추적자", "copy": "압박 지목이 범인의 행동을 좁혔습니다."})
         if self.case_mode == "first":
@@ -471,6 +494,12 @@ class Room:
             {"kind": "case", "title": "사건의 핵심", "copy": self.case_profile.get("briefing", "")},
             {"kind": "culprit", "title": "범인의 연결 고리", "copy": f"{culprit.nick}님의 밤 행동과 습격 기록이 같은 시간대에 겹쳤습니다." if culprit else "범인의 행동 연결 고리를 복기하세요."},
         ]
+        if confirmed_theories or partial_theories:
+            self.final_highlights.append({
+                "kind": "theory",
+                "title": "봉인된 가설 검증",
+                "copy": f"완전 적중 {confirmed_theories}개 · 부분 적중 {partial_theories}개. 공개 보드에서 각 연결을 복기하세요.",
+            })
 
     def _add_forensic_clue(
         self,
@@ -765,6 +794,8 @@ class Room:
         self.memory_prompts = {player.id: random.choice(MEMORY_PROMPTS) for player in active}
         self.scene_submissions.clear()
         self.scene_results.clear()
+        self.theories.clear()
+        self.theory_stakes = {player.id: 2 for player in active}
         self.oaths.clear()
         self.contracts.clear()
         self.ghost_echoes.clear()
@@ -836,6 +867,8 @@ class Room:
         self.scene_fragments.clear()
         self.scene_submissions.clear()
         self.scene_results.clear()
+        self.theories.clear()
+        self.theory_stakes.clear()
         self.oaths.clear()
         self.contracts.clear()
         self.ghost_echoes.clear()
@@ -1155,13 +1188,13 @@ class Room:
         positions = {fragment_id: index for index, fragment_id in enumerate(solution_order)}
         correct_pairs = sum(
             positions.get(left, -1) < positions.get(right, -1)
-            for left, right in zip(order, order[1:])
+            for left, right in zip(order, order[1:], strict=False)
         )
         total = max(1, len(order) - 1)
         # A valid adjacent link is a causal connection, not just an earlier
         # timestamp. This makes the mini-game explain *why* the order works.
         links = self.case_solution.get("links") or {}
-        causal_pairs = sum(1 for left, right in zip(order, order[1:]) if links.get(left) == right)
+        causal_pairs = sum(1 for left, right in zip(order, order[1:], strict=False) if links.get(left) == right)
         score = round((correct_pairs * 0.55 + causal_pairs * 0.45) / total * 100)
         self.scene_submissions[pid] = {"round": self.round, "order": order, "at": int(time.time() * 1000)}
         self.scene_results[pid] = {
@@ -1172,6 +1205,148 @@ class Room:
         }
         self._record(f"{player.nick}님이 현장 타임라인을 제출했습니다. ({score}점)")
         self._moment("reconstruction", "현장 타임라인이 제출되었습니다.", actor=pid)
+        return None
+
+    def _theory_key(self, pid: str, round_number: int | None = None) -> str:
+        return f"{self.round if round_number is None else round_number}:{pid}"
+
+    def _theory_view(self, theory: dict[str, Any], reveal: bool = False) -> dict[str, Any]:
+        """Return the public portion of a sealed hypothesis.
+
+        A theory is meant to be a social commitment, not an answer key.  Its
+        selected names and evidence are public immediately, while the hidden
+        link match and explanation are only attached after the case closes.
+        """
+        public = {
+            "id": theory["id"],
+            "round": theory["round"],
+            "owner_id": theory["owner_id"],
+            "owner": theory["owner"],
+            "target_id": theory["target_id"],
+            "target": theory["target"],
+            "clue_id": theory["clue_id"],
+            "clue_code": theory["clue_code"],
+            "clue_title": theory["clue_title"],
+            "fragment_id": theory["fragment_id"],
+            "fragment_time": theory["fragment_time"],
+            "fragment_title": theory["fragment_title"],
+            "stake": theory["stake"],
+            "sealed_at": theory["sealed_at"],
+        }
+        if reveal:
+            public.update({
+                "status": theory.get("status", "broken"),
+                "matched_links": int(theory.get("matched_links", 0)),
+                "total_links": int(theory.get("total_links", 3)),
+                "explanation": theory.get("explanation", "검증 결과를 확인할 수 없습니다."),
+            })
+        return public
+
+    def _resolve_theory(self, theory: dict[str, Any]) -> dict[str, Any]:
+        """Resolve the three links in a hypothesis after the hidden roles are known."""
+        target = self.players.get(str(theory.get("target_id", "")))
+        clue = next((item for item in self.clues if item.get("id") == theory.get("clue_id")), None)
+        target_match = bool(target and target.role == "mafia")
+        fragment_match = str(theory.get("fragment_id")) == "attack"
+        clue_match = bool(clue and theory.get("target_id") in clue.get("suspect_ids", []))
+        matched_links = int(target_match) + int(fragment_match) + int(clue_match)
+        if target_match and fragment_match and clue_match:
+            status = "confirmed"
+            explanation = f"{theory['target']}님은 실제 마피아였고, {theory['fragment_title']}가 습격 시각과 일치했습니다."
+        elif target_match and clue_match:
+            status = "partial"
+            explanation = f"{theory['target']}님은 마피아였지만, 선택한 시간 조각은 실제 습격 장면이 아니었습니다."
+        elif fragment_match and clue_match:
+            status = "partial"
+            explanation = f"습격 장면은 정확했지만 {theory['target']}님은 마피아가 아니었습니다. 단서가 만든 함정입니다."
+        elif target_match:
+            status = "partial"
+            explanation = f"{theory['target']}님은 마피아였지만, 단서와 시간 연결을 완성하지 못했습니다."
+        elif fragment_match:
+            status = "partial"
+            explanation = "습격 시각은 맞혔지만 지목한 용의자의 정체는 빗나갔습니다."
+        else:
+            status = "broken"
+            explanation = "용의자·단서·시간 조각이 실제 사건의 인과 고리와 이어지지 않았습니다."
+        theory.update({
+            "status": status,
+            "matched_links": matched_links,
+            "total_links": 3,
+            "explanation": explanation,
+        })
+        return theory
+
+    def _resolve_theories(self) -> None:
+        for theory in self.theories.values():
+            self._resolve_theory(theory)
+
+    def submit_theory(
+        self,
+        pid: str,
+        target_id: str,
+        clue_id: str,
+        fragment_id: str,
+        raw_stake: object,
+    ) -> str | None:
+        """Seal one causal hypothesis during the daytime discussion.
+
+        The server verifies ownership of the private fragment and that the
+        selected clue actually names the suspect.  It never reveals whether
+        either hidden link is correct until ``gameover``.
+        """
+        player = self.players.get(pid)
+        target = self.players.get(target_id)
+        if self.phase != "day" or not player or not player.alive or player.role == "spectator":
+            return "낮 토론 중인 생존자만 증거 연결 고리를 봉인할 수 있습니다."
+        key = self._theory_key(pid)
+        if key in self.theories:
+            return "이번 낮의 증거 연결 고리는 이미 봉인했습니다."
+        if isinstance(raw_stake, bool):
+            return "증거 인장은 1개 또는 2개만 걸 수 있습니다."
+        try:
+            stake = int(raw_stake)
+        except (TypeError, ValueError):
+            return "증거 인장은 1개 또는 2개만 걸 수 있습니다."
+        remaining = self.theory_stakes.get(pid, 0)
+        if stake not in {1, 2} or stake > remaining:
+            return f"남은 증거 인장은 {remaining}개입니다. 1개 또는 2개를 선택해 주세요."
+        if not target or not target.alive or target.id == pid or target.role == "spectator":
+            return "살아 있는 다른 용의자를 선택해 주세요."
+        clue = next((item for item in self.clues if item.get("id") == clue_id), None)
+        if not clue:
+            return "현재 사건 파일에서 확인할 수 있는 감식 단서를 선택해 주세요."
+        if target_id not in clue.get("suspect_ids", []):
+            return "선택한 감식 단서는 그 용의자를 가리키지 않습니다."
+        fragment = next(
+            (item for item in self.scene_fragments.get(pid, []) if item.get("id") == fragment_id),
+            None,
+        )
+        if not fragment:
+            return "당신이 받은 시간 조각만 증거 연결에 사용할 수 있습니다."
+        now_ms = int(time.time() * 1000)
+        theory = {
+            "id": secrets.token_hex(6),
+            "round": self.round,
+            "owner_id": pid,
+            "owner": player.nick,
+            "target_id": target.id,
+            "target": target.nick,
+            "clue_id": clue["id"],
+            "clue_code": clue["code"],
+            "clue_title": clue["title"],
+            "fragment_id": fragment["id"],
+            "fragment_time": fragment["time"],
+            "fragment_title": fragment["title"],
+            "stake": stake,
+            "sealed_at": now_ms,
+        }
+        self.theories[key] = theory
+        self.theory_stakes[pid] = remaining - stake
+        line = f"{player.nick}님이 증거 연결 고리를 봉인했습니다. (인장 {stake}개)"
+        self._record(line)
+        self._moment("theory", "한 명의 추리 가설이 공개 보드에 봉인되었습니다.", actor=pid, target=target.id)
+        if player.is_bot:
+            self._remember_ai(player, "증거 연결 고리를 봉인함", target, "doubt")
         return None
 
     def make_oath(self, pid: str, target_id: str, raw: str) -> str | None:
@@ -1337,7 +1512,7 @@ class Room:
             self._record("투표가 시작되었습니다. 가장 의심스러운 사람을 지목하세요.")
             self._director_beat(
                 "감독관의 경고",
-                "봉인된 맹세와 현장 재구성 결과를 함께 비교한 뒤 표를 제출하세요.",
+                "봉인된 증거 연결 고리·맹세·현장 재구성 결과를 함께 비교한 뒤 표를 제출하세요.",
                 "amber",
             )
             self._set_phase("vote", self._seconds("vote"))
@@ -1585,6 +1760,41 @@ class Room:
                     target = self._bot_choose_target(bot, targets)
                     if target:
                         self.make_oath(bot.id, target.id, "다음 투표에서 이 사람의 알리바이를 확인하겠습니다.")
+                if self.phase == "day" and self.theory_stakes.get(bot.id, 0) > 0 and elapsed > 22:
+                    theory_key = self._theory_key(bot.id)
+                    if theory_key not in self.theories and self.clues:
+                        latest_clues = list(self.clues)[-3:]
+                        candidates = [
+                            p for p in alive
+                            if p.id != bot.id
+                            and (bot.role != "mafia" or p.role != "mafia")
+                        ]
+                        target = self.players.get(self._bot_suspicions.get(bot.id, ""))
+                        if not target or target not in candidates:
+                            clue_targets = {
+                                suspect_id
+                                for clue in latest_clues
+                                for suspect_id in clue.get("suspect_ids", [])
+                            }
+                            narrowed = [p for p in candidates if p.id in clue_targets]
+                            target = self._bot_choose_target(bot, narrowed or candidates)
+                        if target:
+                            clue = next(
+                                (item for item in reversed(latest_clues) if target.id in item.get("suspect_ids", [])),
+                                None,
+                            )
+                            fragments = self.scene_fragments.get(bot.id, [])
+                            if clue and fragments:
+                                fragment = random.choice(fragments)
+                                remaining = self.theory_stakes.get(bot.id, 0)
+                                stake = 2 if remaining >= 2 and random.random() < 0.2 else 1
+                                self.submit_theory(
+                                    bot.id,
+                                    target.id,
+                                    str(clue["id"]),
+                                    str(fragment["id"]),
+                                    stake,
+                                )
             if elapsed > 5:
                 for ghost in dead_bots:
                     mark = f"{self.round}:{ghost.id}"
@@ -1778,6 +1988,13 @@ class Room:
 
     def _finish(self, winner: str) -> None:
         self.winner = winner
+        self._resolve_theories()
+        for theory in self.theories.values():
+            result = theory.get("status", "broken")
+            self._record(
+                f"증거 연결 검증 — {theory['owner']}님의 가설은 "
+                f"{'확인' if result == 'confirmed' else '부분 적중' if result == 'partial' else '붕괴'}되었습니다."
+            )
         for p in self.players.values():
             won = (winner == "mafia" and p.role == "mafia") or (
                 winner == "citizen" and p.role not in {"mafia", "trickster", "spectator"}
@@ -1818,6 +2035,16 @@ class Room:
                 p.score = max(0, p.score - 2)
             if any(echo.get("owner_id") == p.id for echo in self.ghost_echoes):
                 p.score += 4
+            for theory in self.theories.values():
+                if theory.get("owner_id") != p.id:
+                    continue
+                stake = int(theory.get("stake", 1))
+                if theory.get("status") == "confirmed":
+                    p.score += 10 * stake
+                elif theory.get("status") == "partial":
+                    p.score += 3 * stake
+                else:
+                    p.score = max(0, p.score - stake)
         self._build_awards()
         self._build_case_report()
         self._set_phase("gameover", 0)
@@ -1871,7 +2098,12 @@ class Room:
                 event = self.round_event["title"] if self.round_event else "자정 사건"
                 can_tip = f"{self.round}:{viewer.id}" not in self.tip_marks
                 tip_hint = " 익명 제보실에서 출처 없는 단서를 한 번 봉인할 수 있습니다." if can_tip else " 익명 제보는 이미 봉인했습니다."
-                return f"{event} 적용 중. 현재 {speaker.nick}님이 집중 발언자입니다. 질문을 듣고 이번 낮 한 번뿐인 긴급 지목을 신중하게 사용하세요.{tip_hint}"
+                theory_hint = (
+                    " 용의자·감식 단서·내 시간 조각을 증거 연결 고리로 봉인하고 인장을 걸 수 있습니다."
+                    if self.theory_stakes.get(viewer.id, 0) > 0 and self._theory_key(viewer.id) not in self.theories
+                    else " 이번 낮의 증거 연결 고리는 이미 봉인했거나 인장을 모두 사용했습니다."
+                )
+                return f"{event} 적용 중. 현재 {speaker.nick}님이 집중 발언자입니다. 질문을 듣고 이번 낮 한 번뿐인 긴급 지목을 신중하게 사용하세요.{tip_hint}{theory_hint}"
             if viewer.intel:
                 return f"최근 조사 기록: {viewer.intel[-1]} 공개할지, 한 턴 더 숨길지 판단하세요."
             return "한 사람을 몰아가기보다 각자 ‘어젯밤 누구를 선택했는지’ 물어보면 모순을 찾기 쉽습니다."
@@ -1960,6 +2192,14 @@ class Room:
         )
         current_oaths = [oath for oath in self.oaths.values() if oath.get("round") == self.round]
         visible_contracts = [contract for contract in self.contracts.values() if contract.get("owner_id") == viewer.id or contract.get("target_id") == viewer.id]
+        reveal_theories = self.phase == "gameover"
+        theory_board = [
+            self._theory_view(theory, reveal=reveal_theories)
+            for theory in self.theories.values()
+        ]
+        viewer_theories = [theory for theory in self.theories.values() if theory.get("owner_id") == viewer.id]
+        latest_theory = max(viewer_theories, key=lambda item: (int(item.get("round", 0)), int(item.get("sealed_at", 0))), default=None)
+        current_theory = self.theories.get(self._theory_key(viewer.id))
         ai_social = []
         if self.mode == "solo" or self.case_mode == "first":
             for bot in self.players.values():
@@ -1986,6 +2226,7 @@ class Room:
                 "completed": scene_completed,
                 "total": sum(player.alive and player.role != "spectator" for player in self.players.values()),
             },
+            "theory_board": theory_board,
             "oaths": current_oaths,
             "contracts": visible_contracts,
             "ai_social": ai_social,
@@ -2066,6 +2307,13 @@ class Room:
                 "can_reconstruct": (
                     self.phase in {"dawn", "day", "vote"} and viewer.alive
                     and self.scene_submissions.get(viewer.id, {}).get("round") != self.round
+                ),
+                "theory": self._theory_view(current_theory or latest_theory, reveal=reveal_theories) if (current_theory or latest_theory) else None,
+                "theory_stakes": self.theory_stakes.get(viewer.id, 0),
+                "can_theorize": (
+                    self.phase == "day" and viewer.alive and viewer.role != "spectator"
+                    and self.theory_stakes.get(viewer.id, 0) > 0
+                    and current_theory is None
                 ),
                 "oath_target": self.oaths.get(viewer.id, {}).get("target_id"),
                 "oath_text": self.oaths.get(viewer.id, {}).get("text", ""),

@@ -129,6 +129,14 @@ async def game_socket(
                     error = arena.seal_memory(player.id, str(msg.get("text", "")))
                 case "reconstruct":
                     error = arena.reconstruct_scene(player.id, msg.get("order"))
+                case "theory":
+                    error = arena.submit_theory(
+                        player.id,
+                        str(msg.get("target", "")),
+                        str(msg.get("clue_id", "")),
+                        str(msg.get("fragment_id", "")),
+                        msg.get("stake"),
+                    )
                 case "oath":
                     error = arena.make_oath(
                         player.id,

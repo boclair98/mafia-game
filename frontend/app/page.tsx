@@ -2,7 +2,7 @@
 
 import {
   Activity, Award, Ban, Bot, BookOpen, Check, ChevronLeft, ChevronRight, Clipboard, Crosshair, Download, Eye, FileText, Film, Flag, Gavel,
-  Headphones, HeartPulse, LockKeyhole, LogIn, MessageCircle, Mic, MicOff, Moon, PhoneOff, Radio, RotateCcw, Search, Send, Siren,
+  Headphones, HeartPulse, Link2, LockKeyhole, LogIn, MessageCircle, Mic, MicOff, Moon, PhoneOff, Radio, RotateCcw, Search, Send, Siren,
   Settings, Share2, ShieldCheck, ShieldQuestion, Skull, Smartphone, Sparkles,
   TimerReset, Trophy, UserPlus, Users, Volume2, Vote, X,
 } from "lucide-react";
@@ -85,6 +85,9 @@ function phaseNarration(game: GameState, phase: GameState["phase"]) {
     return phase === "dawn" ? `새벽 사건 보고입니다. ${latest}` : `판결 결과입니다. ${latest}`;
   }
   if (phase === "defense" && accused) return `${accused.n}님의 최후 변론을 시작합니다.`;
+  if (phase === "day" && game.me.can_theorize) {
+    return "낮 토론이 시작되었습니다. 공개 단서와 당신의 시간 조각을 연결해 증거 고리를 봉인하세요.";
+  }
   return getNarrativeLine({ ...game, phase }) || PHASE_NARRATION[phase];
 }
 
@@ -159,6 +162,10 @@ export default function GamePage() {
   const [willText, setWillText] = useState("");
   const [memoryText, setMemoryText] = useState("");
   const [sceneOrder, setSceneOrder] = useState<string[]>([]);
+  const [theoryTarget, setTheoryTarget] = useState<string | null>(null);
+  const [theoryClueId, setTheoryClueId] = useState<string | null>(null);
+  const [theoryFragmentId, setTheoryFragmentId] = useState<string | null>(null);
+  const [theoryStake, setTheoryStake] = useState<1 | 2>(1);
   const [oathTarget, setOathTarget] = useState<string | null>(null);
   const [oathText, setOathText] = useState("");
   const [contractTarget, setContractTarget] = useState<string | null>(null);
@@ -557,6 +564,7 @@ export default function GamePage() {
             public_leads: next.public_leads ?? [],
             memory_reveals: next.memory_reveals ?? [],
             scene_progress: next.scene_progress ?? { completed: 0, total: 0 },
+            theory_board: next.theory_board ?? [],
             oaths: next.oaths ?? [],
             ghost_echoes: next.ghost_echoes ?? [],
             director_beats: next.director_beats ?? [],
@@ -586,6 +594,9 @@ export default function GamePage() {
               scene_fragments: next.me.scene_fragments ?? [],
               scene_result: next.me.scene_result ?? null,
               can_reconstruct: next.me.can_reconstruct ?? false,
+              theory: next.me.theory ?? null,
+              theory_stakes: next.me.theory_stakes ?? 0,
+              can_theorize: next.me.can_theorize ?? false,
               oath_target: next.me.oath_target ?? null,
               oath_text: next.me.oath_text ?? "",
               can_oath: next.me.can_oath ?? false,
@@ -595,6 +606,10 @@ export default function GamePage() {
           });
           if (phaseChanged) {
             setSceneOrder([]);
+            setTheoryTarget(null);
+            setTheoryClueId(null);
+            setTheoryFragmentId(null);
+            setTheoryStake(1);
             setOathTarget(next.me.oath_target ?? null);
             setOathText("");
             setContractTarget(null);
@@ -773,7 +788,7 @@ export default function GamePage() {
   const currentDirective = !game || game.phase === "lobby" ? "용의자를 모으고 모두 준비 상태인지 확인하세요."
     : game.phase === "reveal" ? roleMeta.goal
     : game.phase === "night" ? (["mafia", "doctor", "detective", "bodyguard"].includes(role) ? roleMeta.power : "침묵을 유지하고 아침의 사건 보고를 기다리세요.")
-    : game.phase === "day" ? "모두 자유롭게 토론합니다. 집중 발언자의 모순은 질문함과 추리 보드에 따로 기록하세요."
+    : game.phase === "day" ? (game.me.can_theorize ? "모두 자유롭게 토론합니다. 공개 단서와 내 시간 조각을 연결해 증거 고리를 봉인하세요." : "모두 자유롭게 토론합니다. 집중 발언자의 모순과 봉인된 증거 고리를 함께 비교하세요.")
     : game.phase === "vote" ? "개인 기록과 공개 발언을 대조한 뒤 최종 표를 봉인하세요."
     : game.phase === "defense" ? (isAccused ? "당신의 마지막 변론입니다. 행동과 주장을 명확히 설명하세요." : "피고의 마지막 진술에서 모순을 찾으세요.")
     : game.phase === "verdict" ? (isAccused ? "도시의 최종 결정을 기다리세요." : "감정이 아닌 발언과 사건 기록을 근거로 판결하세요.")
@@ -1045,13 +1060,28 @@ export default function GamePage() {
     send({ t: "reconstruct", order: sceneOrder });
   };
 
+  const submitTheory = (event: FormEvent) => {
+    event.preventDefault();
+    if (!game?.me.can_theorize || !theoryTarget || !theoryClueId || !theoryFragmentId) return;
+    if (!send({ t: "theory", target: theoryTarget, clue_id: theoryClueId, fragment_id: theoryFragmentId, stake: theoryStake })) return;
+    setTheoryTarget(null);
+    setTheoryClueId(null);
+    setTheoryFragmentId(null);
+    setTheoryStake(1);
+    speakLine("증거 연결 고리를 봉인했습니다. 진실은 사건 종료 후 검증됩니다.", false);
+  };
+
   const copyCaseFile = async () => {
     if (!game) return;
     const roles = game.players.filter((player) => player.role).map((player) => `${player.n} — ${ROLE_META[player.role!].name} · ${player.score}점`).join("\n");
     const clues = game.clues.map((clue) => `${clue.code} ${clue.title} — ${clue.detail}`).join("\n");
+    const theories = game.theory_board.map((theory) => {
+      const verdict = theory.status ? ` · ${theory.status} ${theory.matched_links ?? 0}/${theory.total_links ?? 3}` : " · 검증 대기";
+      return `DAY ${theory.round} · ${theory.owner} → ${theory.target} · ${theory.clue_code} ${theory.clue_title} + ${theory.fragment_time} ${theory.fragment_title} · 인장 ${theory.stake}${verdict}`;
+    }).join("\n");
     const tips = game.tips.map((tip) => `DAY ${tip.round} · 익명 제보 — ${tip.text}`).join("\n");
     const history = game.case_log.map((line, index) => `${String(index + 1).padStart(2, "0")}  ${line}`).join("\n");
-    await navigator.clipboard.writeText(`[검은 자정 · ${room}]\n${roles}\n\n현장 단서\n${clues || "아직 확보된 단서 없음"}\n\n익명 제보\n${tips || "도착한 익명 제보 없음"}\n\n사건 기록\n${history}`);
+    await navigator.clipboard.writeText(`[검은 자정 · ${room}]\n${roles}\n\n현장 단서\n${clues || "아직 확보된 단서 없음"}\n\n증거 연결 고리\n${theories || "봉인된 가설 없음"}\n\n익명 제보\n${tips || "도착한 익명 제보 없음"}\n\n사건 기록\n${history}`);
     setNotice("전체 사건 기록을 복사했습니다.");
   };
 
@@ -1272,6 +1302,7 @@ export default function GamePage() {
           {game.me.private_lead && game.phase !== "lobby" && <PrivateLeadCard lead={game.me.private_lead} canReveal={game.phase === "day" && game.me.alive} onReveal={() => send({ t: "reveal_lead", lead_id: game.me.private_lead?.id })} />}
           {game.phase === "reveal" && <MemorySealCard game={game} text={memoryText} setText={setMemoryText} onSubmit={submitMemory} />}
           {["dawn", "day", "vote"].includes(game.phase) && <SceneReconstructionCard game={game} order={sceneOrder} setOrder={setSceneOrder} onSubmit={submitScene} />}
+          {["day", "vote", "gameover"].includes(game.phase) && <EvidenceChainCard game={game} target={theoryTarget} setTarget={setTheoryTarget} clueId={theoryClueId} setClueId={setTheoryClueId} fragmentId={theoryFragmentId} setFragmentId={setTheoryFragmentId} stake={theoryStake} setStake={setTheoryStake} onSubmit={submitTheory} />}
           {game.phase === "day" && <OathCard game={game} target={oathTarget} setTarget={setOathTarget} text={oathText} setText={setOathText} onSubmit={submitOath} />}
           {game.phase === "day" && <ContractCard game={game} target={contractTarget} setTarget={setContractTarget} text={contractText} setText={setContractText} onSubmit={submitContract} onResponse={(contractId, accepted) => send({ t: "contract_response", contract_id: contractId, accepted })} />}
           {!game.me.alive && !["spectator", "mafia"].includes(role) && <AfterlifePanel game={game} onPredict={(target) => send({ t: "ghost_predict", target })} ghostText={ghostText} setGhostText={setGhostText} onEcho={submitGhostEcho} />}
@@ -1514,7 +1545,7 @@ function CaseFileModal({ game, room, onClose, onCopy }: { game: GameState; room:
         <header><div><span>BLACK MIDNIGHT / ARCHIVE · {narrative.codename}</span><h2>사건 파일</h2><p>ROOM {room} · DAY {game.round || 0} · {game.case_profile.location}</p></div><button onClick={onClose} aria-label="사건 기록 닫기"><X size={19} /></button></header>
         <div className="case-modal-grid">
           <aside><div className="case-seal"><Gavel size={26} /><span>{game.phase === "gameover" ? "CASE CLOSED" : "ACTIVE CASE"}</span></div><div className="case-prologue"><small>PROLOGUE · {game.case_profile.victim}</small><b>{game.case_profile.title}</b><p>{narrative.prologue}</p><em>{narrative.motif}</em></div><h3>용의자 기록</h3>{game.players.map((player, index) => <div className="case-suspect" key={player.id}><div className={`avatar-photo avatar-${index % 12}`} /><span><b>{player.n}</b><small>{game.phase === "gameover" && player.role ? ROLE_META[player.role].name : player.alive ? "생존 · 신원 미상" : "사망 · 신원 미상"}</small></span><em>{player.score} PTS</em></div>)}</aside>
-          <article><div className="case-log-title"><span>FORENSIC EVIDENCE</span><b>{game.clues.length} CLUES</b></div>{game.clues.length > 0 && <div className="case-clue-grid">{game.clues.map((clue) => <div key={clue.id}><span>{clue.code}</span><b>{clue.title}</b><p>{clue.detail}</p><small>{clue.outcome}</small></div>)}</div>}<div className="case-log-title timeline-title"><span>INCIDENT TIMELINE</span><b>{game.case_log.length} RECORDS</b></div><div className="case-log-scroll">{game.case_log.length === 0 && <p className="case-empty">아직 기록된 사건이 없습니다.</p>}{game.case_log.map((line, index) => <div key={`${line}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><p>{line}</p></div>)}</div><button className="secondary-button case-copy" onClick={onCopy}><Clipboard size={16} />전체 사건 기록 복사</button></article>
+          <article><div className="case-log-title"><span>FORENSIC EVIDENCE</span><b>{game.clues.length} CLUES</b></div>{game.clues.length > 0 && <div className="case-clue-grid">{game.clues.map((clue) => <div key={clue.id}><span>{clue.code}</span><b>{clue.title}</b><p>{clue.detail}</p><small>{clue.outcome}</small></div>)}</div>}{game.theory_board.length > 0 && <><div className="case-log-title theory-file-title"><span>CHAIN OF EVIDENCE</span><b>{game.theory_board.length} HYPOTHESES</b></div><div className="case-theory-grid">{[...game.theory_board].reverse().map((theory) => <div key={theory.id}><header><b>{theory.owner} → {theory.target}</b><em>{theory.status ? `${theory.matched_links ?? 0}/${theory.total_links ?? 3}` : "SEALED"}</em></header><p>{theory.clue_code} · {theory.clue_title}</p><p>{theory.fragment_time} · {theory.fragment_title}</p>{theory.explanation && <small>{theory.explanation}</small>}</div>)}</div></>}<div className="case-log-title timeline-title"><span>INCIDENT TIMELINE</span><b>{game.case_log.length} RECORDS</b></div><div className="case-log-scroll">{game.case_log.length === 0 && <p className="case-empty">아직 기록된 사건이 없습니다.</p>}{game.case_log.map((line, index) => <div key={`${line}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><p>{line}</p></div>)}</div><button className="secondary-button case-copy" onClick={onCopy}><Clipboard size={16} />전체 사건 기록 복사</button></article>
         </div>
       </section>
     </div>
@@ -1576,6 +1607,61 @@ function MemorySealCard({ game, text, setText, onSubmit }: { game: GameState; te
 function SceneReconstructionCard({ game, order, setOrder, onSubmit }: { game: GameState; order: string[]; setOrder: (value: string[]) => void; onSubmit: () => void }) {
   const toggle = (id: string) => setOrder(order.includes(id) ? order.filter((item) => item !== id) : [...order, id]);
   return <section className="scene-reconstruction-card"><header><Search size={17} /><span><small>CAUSAL TIMELINE · ROUND {game.round}</small><b>현장 타임라인 복원</b></span><em>{game.scene_progress.completed}/{game.scene_progress.total} 제출</em></header><p>시간순만 맞히는 퍼즐이 아닙니다. 접근 → 기록 공백 → 습격 → 알리바이 → 봉인처럼 실제 역할 행동이 이어지는 원인을 찾아보세요.</p><div className="scene-fragment-grid">{game.me.scene_fragments.map((fragment) => <button type="button" key={fragment.id} className={order.includes(fragment.id) ? "picked" : ""} onClick={() => toggle(fragment.id)}><small>{fragment.time}</small><b>{fragment.title}</b><span>{fragment.detail}</span>{order.includes(fragment.id) && <i>{order.indexOf(fragment.id) + 1}</i>}</button>)}</div><footer>{game.me.scene_result ? <span className="scene-result"><Check size={14} />내 재구성 {game.me.scene_result.score}점 · {game.me.scene_result.correct_pairs}/{game.me.scene_result.total} 시간 연결{game.me.scene_result.deduction && <small>{game.me.scene_result.deduction}</small>}</span> : <><span>{order.length}개 조각 선택</span><button type="button" disabled={!game.me.can_reconstruct || order.length < 2} onClick={onSubmit}><LockKeyhole size={14} />타임라인 제출</button></>}</footer></section>;
+}
+
+function EvidenceChainCard({ game, target, setTarget, clueId, setClueId, fragmentId, setFragmentId, stake, setStake, onSubmit }: {
+  game: GameState;
+  target: string | null;
+  setTarget: (value: string | null) => void;
+  clueId: string | null;
+  setClueId: (value: string | null) => void;
+  fragmentId: string | null;
+  setFragmentId: (value: string | null) => void;
+  stake: 1 | 2;
+  setStake: (value: 1 | 2) => void;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  const candidates = game.players.filter((player) => player.alive && player.id !== game.me.id && player.role !== "spectator");
+  const clues = game.clues.filter((clue) => !target || clue.suspect_ids.includes(target));
+  const sealed = game.me.theory && game.me.theory.round === game.round;
+  const board = [...game.theory_board].reverse();
+  const statusLabel: Record<NonNullable<GameState["theory_board"][number]["status"]>, string> = {
+    confirmed: "완전 적중",
+    partial: "부분 적중",
+    broken: "연결 붕괴",
+  };
+  return (
+    <section className="evidence-chain-card" aria-label="증거 연결 고리">
+      <header>
+        <Link2 size={17} />
+        <span><small>CHAIN OF EVIDENCE · ROUND {game.round}</small><b>증거 연결 고리</b></span>
+        <em>{game.me.theory_stakes} 인장 남음</em>
+      </header>
+      <p>용의자 하나, 공개 감식 단서 하나, 내가 가진 시간 조각 하나를 연결하세요. 1~2개의 증거 인장을 걸고, 진위는 사건 종료 때만 공개됩니다.</p>
+      {game.phase === "day" && game.me.can_theorize && !sealed && (
+        <form className="evidence-chain-form" onSubmit={onSubmit}>
+          <label><span>용의자</span><select value={target ?? ""} onChange={(event) => { setTarget(event.target.value || null); setClueId(null); }}><option value="">연결할 용의자 선택</option>{candidates.map((player) => <option key={player.id} value={player.id}>{player.n}</option>)}</select></label>
+          <label><span>공개 단서</span><select value={clueId ?? ""} onChange={(event) => setClueId(event.target.value || null)} disabled={!target || clues.length === 0}><option value="">{!target ? "먼저 용의자를 선택" : clues.length ? "용의자를 가리키는 단서 선택" : "아직 감식 단서 없음"}</option>{clues.map((clue) => <option key={clue.id} value={clue.id}>{clue.code} · {clue.title}</option>)}</select></label>
+          <label><span>내 시간 조각</span><select value={fragmentId ?? ""} onChange={(event) => setFragmentId(event.target.value || null)}><option value="">내 기록 조각 선택</option>{game.me.scene_fragments.map((fragment) => <option key={fragment.id} value={fragment.id}>{fragment.time} · {fragment.title}</option>)}</select></label>
+          <label className="evidence-stake"><span>걸 인장</span><select value={stake} onChange={(event) => setStake(Number(event.target.value) === 2 ? 2 : 1)}><option value={1}>1개 · 안전한 추리</option><option value={2} disabled={game.me.theory_stakes < 2}>2개 · 확신을 건다</option></select></label>
+          <button type="submit" disabled={!target || !clueId || !fragmentId}><LockKeyhole size={14} />가설 봉인</button>
+        </form>
+      )}
+      {game.phase === "day" && !game.me.can_theorize && !sealed && <div className="evidence-chain-locked"><LockKeyhole size={14} />이번 판의 인장을 모두 사용했거나 아직 연결할 감식 단서가 없습니다.</div>}
+      {sealed && <div className="evidence-chain-locked"><Check size={14} />이번 낮의 가설을 봉인했습니다. 다른 용의자들의 연결을 비교해 보세요.</div>}
+      {game.phase === "vote" && <div className="evidence-chain-locked"><Vote size={14} />투표 전 봉인된 가설입니다. 누구의 인과 고리가 가장 구체적인지 확인하세요.</div>}
+      {game.phase === "gameover" && <div className="evidence-chain-locked resolved"><Sparkles size={14} />사건 파일이 닫혔습니다. 봉인된 연결의 진위가 공개됩니다.</div>}
+      <div className="evidence-chain-board">
+        {board.length === 0 ? <span className="evidence-chain-empty">아직 봉인된 증거 연결이 없습니다. 첫 번째 가설을 남겨 보세요.</span> : board.map((theory) => (
+          <article key={theory.id} className={`evidence-chain-row ${theory.status ?? "sealed"}`}>
+            <div className="evidence-chain-row-head"><span>DAY {theory.round} · {theory.owner} → {theory.target}</span><em>인장 {theory.stake}</em></div>
+            <div className="evidence-chain-links"><b>{theory.clue_code} · {theory.clue_title}</b><Link2 size={13} /><b>{theory.fragment_time} · {theory.fragment_title}</b></div>
+            {theory.status && <p><strong>{statusLabel[theory.status]} · {theory.matched_links}/{theory.total_links} 연결</strong>{theory.explanation}</p>}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function OathCard({ game, target, setTarget, text, setText, onSubmit }: { game: GameState; target: string | null; setTarget: (value: string | null) => void; text: string; setText: (value: string) => void; onSubmit: (event: FormEvent) => void }) {

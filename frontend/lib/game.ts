@@ -35,6 +35,27 @@ export type MemorySeal = { id: string; owner_id: string; owner: string; text: st
 export type SceneFragment = { id: string; time: string; title: string; detail: string };
 export type SceneResult = { round: number; score: number; total: number; correct_pairs: number; causal_pairs?: number; deduction?: string; submitted_at: number };
 export type OathState = { id: string; owner_id: string; owner: string; target_id: string; target: string; text: string; round: number; kept: boolean | null };
+export type TheoryStatus = "confirmed" | "partial" | "broken";
+export type TheoryState = {
+  id: string;
+  round: number;
+  owner_id: string;
+  owner: string;
+  target_id: string;
+  target: string;
+  clue_id: string;
+  clue_code: string;
+  clue_title: string;
+  fragment_id: string;
+  fragment_time: string;
+  fragment_title: string;
+  stake: number;
+  sealed_at: number;
+  status?: TheoryStatus;
+  matched_links?: number;
+  total_links?: number;
+  explanation?: string;
+};
 export type GhostEcho = { id: string; owner_id: string; owner: string; text: string; round: number; at: number };
 export type DirectorBeat = { id: string; round: number; title: string; copy: string; tone: string; at: number };
 export type AISocial = { player_id: string; player: string; persona: string; emotion: string; trust: number; memory: string };
@@ -62,6 +83,7 @@ export type GameState = {
   best_persuader?: { player_id: string; player: string; copy: string } | null;
   ai_social?: AISocial[];
   contracts?: SecretContract[];
+  theory_board: TheoryState[];
   deadline: number;
   winner: "mafia" | "citizen" | "trickster" | null;
   pace: "quick" | "classic";
@@ -92,6 +114,9 @@ export type GameState = {
     scene_fragments: SceneFragment[];
     scene_result: SceneResult | null;
     can_reconstruct: boolean;
+    theory: TheoryState | null;
+    theory_stakes: number;
+    can_theorize: boolean;
     oath_target: string | null;
     oath_text: string;
     can_oath: boolean;
