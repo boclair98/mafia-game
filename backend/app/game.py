@@ -148,15 +148,46 @@ CASE_PROFILES = [
     {"id": "hotel-kitchen", "code": "BM-482", "title": "마지막 주문은 4번 테이블", "location": "백야 호텔 주방", "victim": "수석 셰프 김도현", "briefing": "주문표가 뒤바뀐 2분 동안 주방 출입 기록이 비었습니다. 범인은 맛을 아는 사람입니다."},
 ]
 
-# Every case uses the same causal grammar, but the nouns and surface clues
-# change. This keeps the deduction legible for new players while ensuring the
-# case engine has twelve distinct shells to rotate through.
+# Every case uses five readable anchors, but the causal layout and surface clues
+# change. This keeps the deduction legible for new players while preventing
+# experienced players from solving a room by sorting timestamps alone.
 CASE_TIMELINE = [
     {"id": "approach", "time": "00:38", "title": "접근 기록", "detail": "잠금 장치가 12초 늦게 닫혔습니다. 누군가 현장에 들어온 흔적입니다.", "action_tag": "entry"},
     {"id": "blindspot", "time": "00:39", "title": "기록 공백", "detail": "카메라가 47초 동안 검게 변했습니다. 그 사이 역할 능력이 사용됐을 가능성이 있습니다.", "action_tag": "blindspot"},
     {"id": "attack", "time": "00:40", "title": "습격의 흔적", "detail": "피해자의 마지막 흔적과 공격 흔적이 겹칩니다. 마피아의 밤 행동과 대조하세요.", "action_tag": "attack"},
     {"id": "alibi", "time": "00:41", "title": "알리바이 신호", "detail": "18초짜리 통화가 남았지만 발신자는 확인되지 않았습니다. 누군가의 알리바이가 만들어졌습니다.", "action_tag": "alibi"},
     {"id": "lock", "time": "00:42", "title": "봉인된 현장", "detail": "비상등이 켜진 뒤 현장이 안쪽에서 잠겼습니다. 마지막 행동이 사건을 완성합니다.", "action_tag": "lock"},
+]
+
+# General cases rotate the causal layout so the reconstruction is not a
+# timestamp-sorting exercise. The first case keeps the canonical layout for
+# teaching; party and solo cases can introduce clock drift and a different
+# chain of cause and effect while preserving the same five readable anchors.
+CASE_TIMELINE_LAYOUTS = [
+    {
+        "id": "canonical",
+        "order": ["approach", "blindspot", "attack", "alibi", "lock"],
+        "clock": ["00:38", "00:39", "00:40", "00:41", "00:42"],
+        "chain_label": "접근 기록 → 기록 공백 → 습격의 흔적 → 알리바이 신호 → 봉인된 현장",
+    },
+    {
+        "id": "forged-call",
+        "order": ["approach", "attack", "blindspot", "alibi", "lock"],
+        "clock": ["00:38", "00:41", "00:39", "00:40", "00:42"],
+        "chain_label": "접근 기록 → 습격의 흔적 → 기록 공백 → 알리바이 신호 → 봉인된 현장",
+    },
+    {
+        "id": "blackout-entry",
+        "order": ["blindspot", "approach", "attack", "lock", "alibi"],
+        "clock": ["00:39", "00:38", "00:40", "00:42", "00:41"],
+        "chain_label": "기록 공백 → 접근 기록 → 습격의 흔적 → 봉인된 현장 → 알리바이 신호",
+    },
+    {
+        "id": "sealed-witness",
+        "order": ["approach", "alibi", "blindspot", "attack", "lock"],
+        "clock": ["00:38", "00:41", "00:39", "00:40", "00:42"],
+        "chain_label": "접근 기록 → 알리바이 신호 → 기록 공백 → 습격의 흔적 → 봉인된 현장",
+    },
 ]
 
 ROUND_EVENTS = [
@@ -762,15 +793,26 @@ class Room:
             player.last_reaction_at = 0.0
         self.round = 1
         self.case_profile = random.choice(CASE_PROFILES)
+        layout = CASE_TIMELINE_LAYOUTS[0] if self.case_mode == "first" else random.choice(CASE_TIMELINE_LAYOUTS)
+        fragment_by_id = {fragment["id"]: fragment for fragment in CASE_TIMELINE}
         timeline = []
-        for fragment in CASE_TIMELINE:
+        for index, fragment_id in enumerate(layout["order"]):
+            fragment = fragment_by_id[fragment_id]
             card = dict(fragment)
+            card["time"] = layout["clock"][index]
             card["detail"] = f"{self.case_profile['location']} — {fragment['detail']}"
+            if layout["id"] != "canonical":
+                card["detail"] += " 시계 기록과 실제 인과 순서를 함께 대조하세요."
             timeline.append(card)
         self.case_solution = {
             "timeline": timeline,
             "order": [card["id"] for card in timeline],
-            "links": {"approach": "blindspot", "blindspot": "attack", "attack": "alibi", "alibi": "lock"},
+            "links": {
+                left: right
+                for left, right in zip(layout["order"], layout["order"][1:], strict=False)
+            },
+            "layout_id": layout["id"],
+            "chain_label": layout["chain_label"],
         }
         self.winner = None
         self.actions.clear()
@@ -1200,7 +1242,7 @@ class Room:
         self.scene_results[pid] = {
             "round": self.round, "score": score, "total": total,
             "correct_pairs": correct_pairs, "causal_pairs": causal_pairs,
-            "deduction": "접근 → 기록 공백 → 습격 → 알리바이 → 봉인 순서가 역할 행동과 연결됩니다." if causal_pairs else "첫 단서와 마지막 봉인의 연결을 다시 확인하세요.",
+            "deduction": f"인과 복원 — {self.case_solution.get('chain_label', '접근 기록 → 기록 공백 → 습격의 흔적 → 알리바이 신호 → 봉인된 현장')}" if causal_pairs else "시계 기록만 믿지 말고 첫 단서와 마지막 봉인의 연결을 다시 확인하세요.",
             "submitted_at": int(time.time() * 1000),
         }
         self._record(f"{player.nick}님이 현장 타임라인을 제출했습니다. ({score}점)")

@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 
-from app.game import Player, Room, RoomManager
+from app.game import CASE_TIMELINE, CASE_TIMELINE_LAYOUTS, Player, Room, RoomManager
 
 
 def player(pid: str, role: str = "citizen", *, bot: bool = False) -> Player:
@@ -27,6 +27,32 @@ def room_with(*roles: str) -> Room:
         room.players[participant.id] = participant
     room.host_id = "p1"
     return room
+
+
+def test_case_timeline_layouts_keep_the_same_anchors_but_change_causality():
+    anchor_ids = {fragment["id"] for fragment in CASE_TIMELINE}
+    assert len(CASE_TIMELINE_LAYOUTS) >= 4
+    assert CASE_TIMELINE_LAYOUTS[0]["id"] == "canonical"
+    assert len({tuple(layout["order"]) for layout in CASE_TIMELINE_LAYOUTS}) == len(CASE_TIMELINE_LAYOUTS)
+
+    for layout in CASE_TIMELINE_LAYOUTS:
+        order = layout["order"]
+        assert len(order) == len(anchor_ids)
+        assert set(order) == anchor_ids
+        assert len(layout["clock"]) == len(order)
+        assert layout["chain_label"].count("→") == len(order) - 1
+
+
+def test_general_case_start_selects_a_server_owned_timeline_layout():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    for participant in room.players.values():
+        participant.ready = True
+
+    assert room.start("p1") is None
+    solution = room.case_solution
+    assert solution["layout_id"] in {layout["id"] for layout in CASE_TIMELINE_LAYOUTS}
+    assert [card["id"] for card in solution["timeline"]] == solution["order"]
+    assert set(solution["links"]) == set(solution["order"][:-1])
 
 
 def test_unique_vote_opens_defense_without_immediate_execution():
