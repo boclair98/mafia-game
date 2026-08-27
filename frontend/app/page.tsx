@@ -647,7 +647,7 @@ export default function GamePage() {
       if (!socketRef.current?.send({ t: joinMode === "first" ? "first_start" : "solo_start" })) soloLaunchRef.current = false;
     }, 220);
     return () => window.clearTimeout(timer);
-  }, [game?.host, game?.me.id, game?.phase, joined, joinMode]);
+  }, [game, joined, joinMode]);
 
   // The landing page is intentionally long. When a player opens the join
   // sheet from its lower CTA, browsers preserve the old scroll offset while
@@ -1471,7 +1471,6 @@ export default function GamePage() {
 
 function NarrativeSceneCard({ game, narrative, chapter, narrativeLine }: { game: GameState; narrative: CaseNarrative; chapter: CaseNarrative["chapters"][number]; narrativeLine: string }) {
   const chapterIndex = narrative.chapters.findIndex((item) => item.id === chapter.id);
-  const ending = game.phase === "gameover" ? getEndingLine(game) : null;
   return (
     <section className={`narrative-scene-card narrative-scene-${chapter.id}`} aria-label="현재 사건 장면">
       <div className="narrative-scene-top"><span>{game.mode === "solo" ? "SOLO CASE · " : ""}{chapter.label}</span><small>{narrative.codename} · {String(chapterIndex + 1).padStart(2, "0")} / {String(narrative.chapters.length).padStart(2, "0")}</small></div>
@@ -1622,7 +1621,9 @@ function EvidenceChainCard({ game, target, setTarget, clueId, setClueId, fragmen
   onSubmit: (event: FormEvent) => void;
 }) {
   const candidates = game.players.filter((player) => player.alive && player.id !== game.me.id && player.role !== "spectator");
-  const clues = game.clues.filter((clue) => !target || clue.suspect_ids.includes(target));
+  // A clue is allowed to be a deliberate red herring. The server only
+  // reveals whether the suspect–clue link was real after the case closes.
+  const clues = game.clues;
   const sealed = game.me.theory && game.me.theory.round === game.round;
   const board = [...game.theory_board].reverse();
   const statusLabel: Record<NonNullable<GameState["theory_board"][number]["status"]>, string> = {
@@ -1637,11 +1638,12 @@ function EvidenceChainCard({ game, target, setTarget, clueId, setClueId, fragmen
         <span><small>CHAIN OF EVIDENCE · ROUND {game.round}</small><b>증거 연결 고리</b></span>
         <em>{game.me.theory_stakes} 인장 남음</em>
       </header>
-      <p>용의자 하나, 공개 감식 단서 하나, 내가 가진 시간 조각 하나를 연결하세요. 1~2개의 증거 인장을 걸고, 진위는 사건 종료 때만 공개됩니다.</p>
+      <p>용의자 하나, 공개 감식 단서 하나, 내가 가진 시간 조각 하나를 연결하세요. 1~2개의 증거 인장을 걸고, 단서가 미끼였는지는 사건 종료 때만 공개됩니다.</p>
+      <div className="evidence-chain-note"><Sparkles size={13} />단서가 용의자를 직접 가리키지 않아도 선택할 수 있습니다. 세 연결을 모두 확신할 때만 인장 2개를 거세요.</div>
       {game.phase === "day" && game.me.can_theorize && !sealed && (
         <form className="evidence-chain-form" onSubmit={onSubmit}>
           <label><span>용의자</span><select value={target ?? ""} onChange={(event) => { setTarget(event.target.value || null); setClueId(null); }}><option value="">연결할 용의자 선택</option>{candidates.map((player) => <option key={player.id} value={player.id}>{player.n}</option>)}</select></label>
-          <label><span>공개 단서</span><select value={clueId ?? ""} onChange={(event) => setClueId(event.target.value || null)} disabled={!target || clues.length === 0}><option value="">{!target ? "먼저 용의자를 선택" : clues.length ? "용의자를 가리키는 단서 선택" : "아직 감식 단서 없음"}</option>{clues.map((clue) => <option key={clue.id} value={clue.id}>{clue.code} · {clue.title}</option>)}</select></label>
+          <label><span>공개 단서</span><select value={clueId ?? ""} onChange={(event) => setClueId(event.target.value || null)} disabled={!target || clues.length === 0}><option value="">{!target ? "먼저 용의자를 선택" : clues.length ? "사건 파일의 단서 선택" : "아직 감식 단서 없음"}</option>{clues.map((clue) => <option key={clue.id} value={clue.id}>{clue.code} · {clue.title}</option>)}</select></label>
           <label><span>내 시간 조각</span><select value={fragmentId ?? ""} onChange={(event) => setFragmentId(event.target.value || null)}><option value="">내 기록 조각 선택</option>{game.me.scene_fragments.map((fragment) => <option key={fragment.id} value={fragment.id}>{fragment.time} · {fragment.title}</option>)}</select></label>
           <label className="evidence-stake"><span>걸 인장</span><select value={stake} onChange={(event) => setStake(Number(event.target.value) === 2 ? 2 : 1)}><option value={1}>1개 · 안전한 추리</option><option value={2} disabled={game.me.theory_stakes < 2}>2개 · 확신을 건다</option></select></label>
           <button type="submit" disabled={!target || !clueId || !fragmentId}><LockKeyhole size={14} />가설 봉인</button>

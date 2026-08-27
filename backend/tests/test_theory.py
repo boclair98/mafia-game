@@ -39,15 +39,39 @@ def prepared_room() -> Room:
     return room
 
 
-def test_theory_requires_owned_fragment_and_matching_clue():
+def test_theory_requires_case_clue_and_owned_fragment():
     room = prepared_room()
 
-    assert room.submit_theory("p4", "p3", "clue-1", "attack", 1) == "선택한 감식 단서는 그 용의자를 가리키지 않습니다."
+    assert room.submit_theory("p4", "p1", "missing-clue", "attack", 1) == "현재 사건 파일에서 확인할 수 있는 감식 단서를 선택해 주세요."
     assert room.submit_theory("p4", "p1", "clue-1", "not-owned", 1) == "당신이 받은 시간 조각만 증거 연결에 사용할 수 있습니다."
     assert room.submit_theory("p4", "p1", "clue-1", "attack", 1) is None
     assert room.theory_stakes["p4"] == 1
     assert "status" not in room._state_for(room.players["p1"])["theory_board"][0]
     assert room.submit_theory("p4", "p1", "clue-1", "attack", 1) == "이번 낮의 증거 연결 고리는 이미 봉인했습니다."
+
+
+def test_red_herring_clue_is_allowed_and_resolved_later():
+    room = prepared_room()
+    room.clues.append({
+        "id": "clue-2",
+        "code": "E-01-02",
+        "round": 1,
+        "title": "젖은 우산 자국",
+        "detail": "P2 · P3 구역에서만 발견되었습니다.",
+        "outcome": "위조 가능성",
+        "suspect_ids": ["p2", "p3"],
+        "suspects": ["P2", "P3"],
+    })
+
+    # A public clue can be a deliberate red herring; only the case close
+    # reveals that its suspect link was wrong.
+    assert room.submit_theory("p4", "p1", "clue-2", "attack", 1) is None
+    assert "status" not in room._state_for(room.players["p1"])["theory_board"][0]
+
+    room._finish("citizen")
+    resolved = room._state_for(room.players["p4"])["theory_board"][0]
+    assert resolved["status"] == "partial"
+    assert resolved["matched_links"] == 2
 
 
 def test_theory_resolves_at_gameover_and_rewards_a_confirmed_chain():

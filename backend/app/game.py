@@ -1290,9 +1290,9 @@ class Room:
     ) -> str | None:
         """Seal one causal hypothesis during the daytime discussion.
 
-        The server verifies ownership of the private fragment and that the
-        selected clue actually names the suspect.  It never reveals whether
-        either hidden link is correct until ``gameover``.
+        The server verifies that the clue belongs to the case file and that
+        the private fragment is owned by the player. It never reveals whether
+        any of the three links is correct until ``gameover``.
         """
         player = self.players.get(pid)
         target = self.players.get(target_id)
@@ -1315,8 +1315,6 @@ class Room:
         clue = next((item for item in self.clues if item.get("id") == clue_id), None)
         if not clue:
             return "현재 사건 파일에서 확인할 수 있는 감식 단서를 선택해 주세요."
-        if target_id not in clue.get("suspect_ids", []):
-            return "선택한 감식 단서는 그 용의자를 가리키지 않습니다."
         fragment = next(
             (item for item in self.scene_fragments.get(pid, []) if item.get("id") == fragment_id),
             None,
