@@ -33,7 +33,7 @@ type InstallPromptEvent = Event & {
 type LocalStats = { games: number; wins: number; streak: number };
 type LegalPage = "terms" | "privacy" | "community";
 type JoinMode = "party" | "solo" | "first";
-type InvestigationTool = "timeline" | "evidence" | "oath" | "contract";
+type InvestigationTool = "matrix" | "timeline" | "evidence" | "oath" | "contract";
 
 const PHASE_META = {
   lobby: ["용의자 대기실", "모두가 정체를 숨기면 자정의 사건이 시작됩니다."],
@@ -367,7 +367,11 @@ export default function GamePage() {
             : ["dawn", "result", "gameover"].includes(game.phase) ? "case"
               : "suspects",
       );
-      setInvestigationTool(["day", "vote", "gameover"].includes(game.phase) ? "evidence" : "timeline");
+      setInvestigationTool(
+        ["day", "vote"].includes(game.phase) ? "matrix"
+          : game.phase === "gameover" ? "evidence"
+            : "timeline",
+      );
       if (phaseAlertTimer.current) window.clearTimeout(phaseAlertTimer.current);
       // Keep the director card on screen long enough to read the objective,
       // hear the announcer, and find the matching action tab.
@@ -1412,12 +1416,14 @@ export default function GamePage() {
                 <em>{game.me.scene_result ? "타임라인 봉인 완료" : game.phase === "gameover" ? "최종 가설 검토" : "필요한 도구만 펼쳐서 사용하세요"}</em>
               </header>
               <nav aria-label="수사 도구 선택">
+                {["day", "vote", "gameover"].includes(game.phase) && <button type="button" className={investigationTool === "matrix" ? "active" : ""} aria-pressed={investigationTool === "matrix"} onClick={() => setInvestigationTool("matrix")}><Search size={14} /><span>용의자 맵</span></button>}
                 {["dawn", "day", "vote"].includes(game.phase) && <button type="button" className={investigationTool === "timeline" ? "active" : ""} aria-pressed={investigationTool === "timeline"} onClick={() => setInvestigationTool("timeline")}><TimerReset size={14} /><span>타임라인</span>{game.me.scene_result && <Check size={12} />}</button>}
                 {["day", "vote", "gameover"].includes(game.phase) && <button type="button" className={investigationTool === "evidence" ? "active" : ""} aria-pressed={investigationTool === "evidence"} onClick={() => setInvestigationTool("evidence")}><Link2 size={14} /><span>증거 고리</span>{game.me.theory && <Check size={12} />}</button>}
                 {game.phase === "day" && <button type="button" className={investigationTool === "oath" ? "active" : ""} aria-pressed={investigationTool === "oath"} onClick={() => setInvestigationTool("oath")}><ShieldCheck size={14} /><span>공개 맹세</span></button>}
                 {game.phase === "day" && <button type="button" className={investigationTool === "contract" ? "active" : ""} aria-pressed={investigationTool === "contract"} onClick={() => setInvestigationTool("contract")}><Users size={14} /><span>비밀 계약</span></button>}
               </nav>
               <div className="investigation-deck-body">
+                {investigationTool === "matrix" && ["day", "vote", "gameover"].includes(game.phase) && <DeductionMatrix game={game} suspicion={suspicionByPlayer} marks={evidence} selected={selected} onSelect={setSelected} onMark={(playerId, mark) => setEvidence((current) => ({ ...current, [playerId]: current[playerId] === mark ? 0 : mark }))} onOpenEvidence={() => setInvestigationTool("evidence")} />}
                 {investigationTool === "timeline" && ["dawn", "day", "vote"].includes(game.phase) && <SceneReconstructionCard game={game} order={sceneOrder} setOrder={setSceneOrder} onSubmit={submitScene} />}
                 {investigationTool === "evidence" && ["day", "vote", "gameover"].includes(game.phase) && <EvidenceChainCard game={game} target={theoryTarget} setTarget={setTheoryTarget} clueId={theoryClueId} setClueId={setTheoryClueId} fragmentId={theoryFragmentId} setFragmentId={setTheoryFragmentId} stake={theoryStake} setStake={setTheoryStake} onSubmit={submitTheory} />}
                 {investigationTool === "oath" && game.phase === "day" && <OathCard game={game} target={oathTarget} setTarget={setOathTarget} text={oathText} setText={setOathText} onSubmit={submitOath} />}
@@ -1583,6 +1589,64 @@ export default function GamePage() {
       {reportTarget && <ReportModal target={reportTarget.name} reason={reportReason} setReason={setReportReason} onSubmit={submitReport} onBlock={() => { blockPlayer(reportTarget.id, reportTarget.name); setReportTarget(null); }} onClose={() => setReportTarget(null)} />}
       <footer><span>BLACK MIDNIGHT / IMMERSIVE CASE SYSTEM</span><span>실시간 관제 · 역할 작전 지시 · 효과음 · 개인 추리 보드</span></footer>
     </main>
+  );
+}
+
+function DeductionMatrix({ game, suspicion, marks, selected, onSelect, onMark, onOpenEvidence }: {
+  game: GameState;
+  suspicion: Map<string, number>;
+  marks: Record<string, -1 | 0 | 1>;
+  selected: string | null;
+  onSelect: (playerId: string) => void;
+  onMark: (playerId: string, mark: -1 | 1) => void;
+  onOpenEvidence: () => void;
+}) {
+  const rows = useMemo(() => game.players
+    .filter((player) => player.id !== game.me.id && (player.alive || game.phase === "gameover"))
+    .map((player) => {
+      const clueHits = game.clues.filter((clue) => clue.suspect_ids.includes(player.id)).length;
+      const leadHits = game.public_leads.filter((lead) => lead.suspect_id === player.id).length;
+      const theories = game.theory_board.filter((theory) => theory.target_id === player.id).length;
+      const claims = game.claims.filter((claim) => claim.speaker_id === player.id).length;
+      const mark = marks[player.id] ?? 0;
+      const heat = Math.max(0, Math.min(100, (suspicion.get(player.id) ?? 0) + theories * 8 + (mark === -1 ? 18 : mark === 1 ? -14 : 0)));
+      return { player, clueHits, leadHits, theories, claims, mark, heat };
+    })
+    .sort((a, b) => b.heat - a.heat || b.clueHits - a.clueHits || a.player.n.localeCompare(b.player.n, "ko")),
+  [game, marks, suspicion]);
+  const priorityCount = rows.filter((row) => row.heat >= 60).length;
+
+  return (
+    <section className="deduction-matrix" aria-label="용의자 추론 매트릭스">
+      <header>
+        <div><Search size={17} /><span><small>LIVE DEDUCTION MATRIX</small><b>용의자 추론 맵</b></span></div>
+        <p>감식 단서, 공개 증거, 봉인 가설과 나의 판단을 한 줄에서 비교하세요.</p>
+        <button type="button" onClick={onOpenEvidence}><Link2 size={14} />증거 고리 만들기</button>
+      </header>
+      <div className="deduction-summary">
+        <span><i className="forensic" />감식 후보</span><span><i className="lead" />공개 증거</span><span><i className="theory" />봉인 가설</span><em>{priorityCount ? `${priorityCount}명 집중 조사` : "아직 결정적 우선순위 없음"}</em>
+      </div>
+      <div className="deduction-table" role="table" aria-label="용의자별 공개 신호 비교">
+        <div className="deduction-row deduction-head" role="row"><span>용의자</span><span>감식</span><span>증거</span><span>가설</span><span>진술</span><span>내 판단</span><span>수사 열기</span></div>
+        {rows.map(({ player, clueHits, leadHits, theories, claims, mark, heat }) => {
+          const playerIndex = Math.max(0, game.players.findIndex((item) => item.id === player.id));
+          const signal = heat >= 60 ? "priority" : heat >= 32 ? "watch" : "quiet";
+          return (
+            <div className={`deduction-row ${selected === player.id ? "selected" : ""}`} role="row" key={player.id}>
+              <span className="deduction-suspect"><i className={`avatar-photo avatar-${playerIndex % 12}`} /><span><b>{player.n}</b><small>{player.alive ? (signal === "priority" ? "집중 조사" : signal === "watch" ? "관찰 필요" : "낮은 신호") : "사망"}</small></span></span>
+              <span className={clueHits ? "has-signal" : ""}><b>{clueHits}</b><small>건</small></span>
+              <span className={leadHits ? "has-signal" : ""}><b>{leadHits}</b><small>건</small></span>
+              <span className={theories ? "has-signal theory" : ""}><b>{theories}</b><small>건</small></span>
+              <span><b>{claims}</b><small>회</small></span>
+              <span className="deduction-mark"><button type="button" className={mark === 1 ? "safe active" : "safe"} aria-pressed={mark === 1} onClick={() => onMark(player.id, 1)}>신뢰</button><button type="button" className={mark === -1 ? "suspect active" : "suspect"} aria-pressed={mark === -1} onClick={() => onMark(player.id, -1)}>의심</button></span>
+              <span className="deduction-focus"><button type="button" className={selected === player.id ? "active" : ""} onClick={() => onSelect(player.id)}><Crosshair size={13} />{selected === player.id ? "선택됨" : "집중"}</button><i><b style={{ width: `${heat}%` }} /></i></span>
+            </div>
+          );
+        })}
+        {rows.length === 0 && <p className="deduction-empty">비교할 용의자가 없습니다.</p>}
+      </div>
+      <footer><ShieldQuestion size={13} /><span>이 수치는 공개된 신호의 밀도입니다. 유죄 판정이 아니므로 반드시 진술과 타임라인을 함께 확인하세요.</span></footer>
+    </section>
   );
 }
 

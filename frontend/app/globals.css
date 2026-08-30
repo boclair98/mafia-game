@@ -591,7 +591,53 @@ footer { max-width: 1550px; margin: 14px auto; display: flex; justify-content: s
 .investigation-deck-body > .scene-reconstruction-card,
 .investigation-deck-body > .evidence-chain-card,
 .investigation-deck-body > .oath-card,
-.investigation-deck-body > .contract-card { margin:0; border:0; background:transparent; box-shadow:none; }
+.investigation-deck-body > .contract-card,
+.investigation-deck-body > .deduction-matrix { margin:0; border:0; background:transparent; box-shadow:none; }
+
+/* The product's core interaction: public evidence becomes a readable suspect map. */
+.deduction-matrix { padding:12px 13px 10px; }
+.deduction-matrix > header { min-height:50px; display:grid; grid-template-columns:auto minmax(180px,1fr) auto; align-items:center; gap:18px; }
+.deduction-matrix > header > div { display:flex; align-items:center; gap:9px; }
+.deduction-matrix > header > div > svg { color:var(--gold); }
+.deduction-matrix > header span { display:grid; gap:2px; }
+.deduction-matrix > header small { color:#a48655; font:7px monospace; letter-spacing:.14em; }
+.deduction-matrix > header b { color:#eee7da; font:17px var(--serif); }
+.deduction-matrix > header p { margin:0; color:#8c9097; font-size:9px; line-height:1.5; }
+.deduction-matrix > header > button { min-height:36px; padding:0 12px; display:flex; align-items:center; justify-content:center; gap:6px; border:1px solid rgba(209,168,92,.44); background:rgba(209,168,92,.08); color:#ddc18d; font-size:9px; font-weight:800; cursor:pointer; }
+.deduction-summary { min-height:32px; margin:8px 0 7px; padding:6px 9px; display:flex; align-items:center; gap:13px; border:1px solid rgba(255,255,255,.06); background:rgba(4,6,9,.48); }
+.deduction-summary span { display:flex; align-items:center; gap:5px; color:#858b94; font-size:8px; }
+.deduction-summary i { width:6px; height:6px; border-radius:50%; background:#9f7d48; box-shadow:0 0 8px rgba(209,168,92,.45); }
+.deduction-summary i.lead { background:#7e9bbd; box-shadow:0 0 8px rgba(126,155,189,.45); }
+.deduction-summary i.theory { background:#a677bd; box-shadow:0 0 8px rgba(166,119,189,.45); }
+.deduction-summary em { margin-left:auto; color:#c1aa7e; font:8px monospace; font-style:normal; }
+.deduction-table { overflow:auto; max-height:310px; border:1px solid rgba(255,255,255,.08); scrollbar-width:thin; }
+.deduction-row { min-width:720px; min-height:48px; padding:5px 8px; display:grid; grid-template-columns:minmax(170px,1.35fr) repeat(4,56px) 122px 105px; align-items:center; gap:5px; border-bottom:1px solid rgba(255,255,255,.055); background:rgba(7,9,13,.44); transition:background .16s,border-color .16s; }
+.deduction-row:last-child { border-bottom:0; }
+.deduction-row.selected { background:linear-gradient(90deg,rgba(209,168,92,.12),rgba(209,168,92,.025)); box-shadow:inset 2px 0 var(--gold); }
+.deduction-head { position:sticky; z-index:2; top:0; min-height:30px; background:#101319; color:#666d77; font:7px monospace; letter-spacing:.08em; }
+.deduction-head > span:not(:first-child) { text-align:center; }
+.deduction-suspect { min-width:0; display:flex; align-items:center; gap:8px; }
+.deduction-suspect > i { flex:0 0 auto; width:31px; height:31px; border:1px solid rgba(255,255,255,.12); border-radius:50%; }
+.deduction-suspect > span { min-width:0; display:grid; gap:2px; }
+.deduction-suspect b { overflow:hidden; color:#e5dfd4; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.deduction-suspect small { color:#707680; font-size:7px; }
+.deduction-row > span:not(.deduction-suspect):not(.deduction-mark):not(.deduction-focus) { display:flex; align-items:baseline; justify-content:center; gap:2px; color:#727984; }
+.deduction-row > span:not(.deduction-suspect):not(.deduction-mark):not(.deduction-focus) b { color:#aeb2b8; font:13px monospace; }
+.deduction-row > span.has-signal b { color:#e0b46b!important; }
+.deduction-row > span.has-signal.theory b { color:#bd8dd3!important; }
+.deduction-row > span small { font-size:7px; }
+.deduction-mark { display:flex; align-items:center; justify-content:center; gap:4px; }
+.deduction-mark button { min-width:48px; height:28px; border:1px solid #30353d; background:#11151a; color:#69707a; font-size:8px; cursor:pointer; }
+.deduction-mark .safe.active { border-color:#477d5a; background:rgba(71,125,90,.17); color:#91cea4; }
+.deduction-mark .suspect.active { border-color:#8f3946; background:rgba(143,57,70,.17); color:#eb8593; }
+.deduction-focus { display:grid; grid-template-columns:auto 1fr; align-items:center; gap:6px; }
+.deduction-focus > button { min-width:55px; height:28px; display:flex; align-items:center; justify-content:center; gap:4px; border:1px solid #3a414b; background:#181c22; color:#9da3ab; font-size:8px; cursor:pointer; }
+.deduction-focus > button.active { border-color:#9d7b42; color:#e3c98f; background:rgba(209,168,92,.1); }
+.deduction-focus > i { height:3px; overflow:hidden; background:#252a31; }
+.deduction-focus > i b { display:block; height:100%; background:linear-gradient(90deg,#76613f,var(--gold),var(--red)); }
+.deduction-empty { margin:0; padding:22px; color:#747b84; text-align:center; font-size:9px; }
+.deduction-matrix > footer { min-height:31px; padding-top:7px; display:flex; align-items:center; gap:6px; color:#777e87; font-size:8px; line-height:1.45; }
+.deduction-matrix > footer svg { flex:0 0 auto; color:#a58758; }
 
 @media (min-width:761px) {
   .phase-banner .phase-now { display:none; }
@@ -611,7 +657,20 @@ footer { max-width: 1550px; margin: 14px auto; display: flex; justify-content: s
   .investigation-deck-body > .scene-reconstruction-card,
   .investigation-deck-body > .evidence-chain-card,
   .investigation-deck-body > .oath-card,
-  .investigation-deck-body > .contract-card { margin:0; }
+  .investigation-deck-body > .contract-card,
+  .investigation-deck-body > .deduction-matrix { margin:0; }
+  .deduction-matrix { padding:9px 8px 8px; }
+  .deduction-matrix > header { grid-template-columns:1fr auto; gap:8px; }
+  .deduction-matrix > header > div { min-width:0; }
+  .deduction-matrix > header > p { display:none; }
+  .deduction-matrix > header > button { min-height:40px; padding:0 9px; }
+  .deduction-summary { gap:9px; overflow-x:auto; }
+  .deduction-summary span { white-space:nowrap; }
+  .deduction-summary em { display:none; }
+  .deduction-table { max-height:290px; }
+  .deduction-row { min-width:650px; grid-template-columns:minmax(145px,1.3fr) repeat(4,48px) 112px 98px; }
+  .deduction-mark button,.deduction-focus > button { min-height:34px; }
+  .deduction-matrix > footer { align-items:flex-start; font-size:8px; }
   .command-dawn { display:flex; }
   .campaign-brand,.campaign-settings { min-height:44px; }
   .campaign-settings { width:44px; height:44px; }
