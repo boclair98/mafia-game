@@ -33,6 +33,7 @@ type InstallPromptEvent = Event & {
 type LocalStats = { games: number; wins: number; streak: number };
 type LegalPage = "terms" | "privacy" | "community";
 type JoinMode = "party" | "solo" | "first";
+type InvestigationTool = "timeline" | "evidence" | "oath" | "contract";
 
 const PHASE_META = {
   lobby: ["용의자 대기실", "모두가 정체를 숨기면 자정의 사건이 시작됩니다."],
@@ -172,7 +173,7 @@ export default function GamePage() {
   const [contractText, setContractText] = useState("");
   const [ghostText, setGhostText] = useState("");
   const [notice, setNotice] = useState("");
-  const [now, setNow] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   const [copied, setCopied] = useState(false);
   const [invitedByLink, setInvitedByLink] = useState(false);
   const [landingScene, setLandingScene] = useState(0);
@@ -199,6 +200,7 @@ export default function GamePage() {
   const [blockedPlayers, setBlockedPlayers] = useState<string[]>([]);
   const [evidence, setEvidence] = useState<Record<string, -1 | 0 | 1>>({});
   const [mobileTab, setMobileTab] = useState<"case" | "suspects" | "talk" | "role">("suspects");
+  const [investigationTool, setInvestigationTool] = useState<InvestigationTool>("timeline");
   const [seenChatCount, setSeenChatCount] = useState(0);
   const [phaseAlert, setPhaseAlert] = useState<GameState["phase"] | null>(null);
   const [decisionFlash, setDecisionFlash] = useState<{ label: string; target: string } | null>(null);
@@ -217,6 +219,9 @@ export default function GamePage() {
   const countdownRemaining = game ? secondsLeft(game.deadline, now) : 0;
   const narrationText = game && soundPhase ? phaseNarration(game, soundPhase) : "";
   const roundEventId = game?.round_event?.id ?? null;
+  const launchPhase = game?.phase;
+  const launchHost = game?.host;
+  const launchPlayerId = game?.me.id;
   const roundEventTitle = game?.round_event?.title ?? "";
   const roundEventTag = game?.round_event?.tag ?? "";
   const roundEventCopy = game?.round_event?.copy ?? "";
@@ -270,11 +275,24 @@ export default function GamePage() {
 
   useEffect(() => {
     if (joined) return;
-    const timer = window.setInterval(() => {
+    const rotate = () => {
       setLandingScene((current) => (current + 1) % LANDING_SCENES.length);
       setLandingRole((current) => (current + 1) % LANDING_ROLES.length);
-    }, 4200);
-    return () => window.clearInterval(timer);
+    };
+    let timer: number | null = null;
+    const syncRotation = () => {
+      if (timer) window.clearInterval(timer);
+      timer = null;
+      if (!document.hidden && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        timer = window.setInterval(rotate, 4200);
+      }
+    };
+    syncRotation();
+    document.addEventListener("visibilitychange", syncRotation);
+    return () => {
+      if (timer) window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", syncRotation);
+    };
   }, [joined]);
 
   useEffect(() => {
@@ -282,8 +300,14 @@ export default function GamePage() {
     fetchLeaderboard().then((entries) => { if (active) setLeaderboard(entries); }).catch(() => undefined);
     const refreshStatus = () => fetchGameStatus().then((next) => { if (active) setNetworkStatus(next); }).catch(() => undefined);
     void refreshStatus();
-    const timer = window.setInterval(refreshStatus, 30_000);
-    return () => { active = false; window.clearInterval(timer); };
+    const refreshWhenVisible = () => { if (!document.hidden) void refreshStatus(); };
+    const timer = window.setInterval(refreshWhenVisible, 30_000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, []);
 
   useEffect(() => {
@@ -295,9 +319,10 @@ export default function GamePage() {
   }, [game?.phase]);
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 250);
-    return () => clearInterval(timer);
-  }, []);
+    if (!joined) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [joined]);
 
   useEffect(() => {
     const modalOpen = joinOpen || tutorialOpen || inviteOpen || caseOpen || rankingOpen || settingsOpen || Boolean(legalPage) || Boolean(reportTarget);
@@ -342,6 +367,7 @@ export default function GamePage() {
             : ["dawn", "result", "gameover"].includes(game.phase) ? "case"
               : "suspects",
       );
+      setInvestigationTool(["day", "vote", "gameover"].includes(game.phase) ? "evidence" : "timeline");
       if (phaseAlertTimer.current) window.clearTimeout(phaseAlertTimer.current);
       // Keep the director card on screen long enough to read the objective,
       // hear the announcer, and find the matching action tab.
@@ -640,14 +666,29 @@ export default function GamePage() {
   // lobby, the host immediately asks the server to seat the AI cast and start
   // the case. Party rooms keep the ready/invite flow unchanged.
   useEffect(() => {
-    if (!joined || !["solo", "first"].includes(joinMode) || !game || game.phase !== "lobby" || game.host !== game.me.id) return;
+    if (!joined || !["solo", "first"].includes(joinMode) || launchPhase !== "lobby" || launchHost !== launchPlayerId) return;
     if (soloLaunchRef.current) return;
     soloLaunchRef.current = true;
-    const timer = window.setTimeout(() => {
-      if (!socketRef.current?.send({ t: joinMode === "first" ? "first_start" : "solo_start" })) soloLaunchRef.current = false;
+    let attempts = 0;
+    let retryTimer: number | null = null;
+    const launch = () => {
+      attempts += 1;
+      const sent = socketRef.current?.send({ t: joinMode === "first" ? "first_start" : "solo_start" }) ?? false;
+      if (!sent || attempts >= 4) {
+        if (retryTimer) window.clearInterval(retryTimer);
+        retryTimer = null;
+        if (!sent) soloLaunchRef.current = false;
+      }
+    };
+    const firstTimer = window.setTimeout(() => {
+      launch();
+      if (attempts < 4) retryTimer = window.setInterval(launch, 1400);
     }, 220);
-    return () => window.clearTimeout(timer);
-  }, [game, joined, joinMode]);
+    return () => {
+      window.clearTimeout(firstTimer);
+      if (retryTimer) window.clearInterval(retryTimer);
+    };
+  }, [joined, joinMode, launchHost, launchPhase, launchPlayerId]);
 
   // The landing page is intentionally long. When a player opens the join
   // sheet from its lower CTA, browsers preserve the old scroll offset while
@@ -783,6 +824,27 @@ export default function GamePage() {
     });
   }, [game, role]);
 
+  const targetPlayerIds = useMemo(() => new Set(targetPlayers.map((player) => player.id)), [targetPlayers]);
+  const visibleChat = useMemo(
+    () => game?.chat.filter((message) => !message.from_id || !blockedPlayers.includes(message.from_id)) ?? [],
+    [blockedPlayers, game?.chat],
+  );
+  const suspicionByPlayer = useMemo(() => {
+    const result = new Map<string, number>();
+    if (!game) return result;
+    for (const player of game.players) {
+      const readHeat = (game.read_summary[player.id]?.suspect ?? 0) * 12;
+      const pressureHeat = (game.pressure_counts[player.id] ?? 0) * 16;
+      result.set(player.id, readHeat + pressureHeat + player.votes * 14);
+    }
+    for (const clue of game.clues) {
+      for (const suspectId of clue.suspect_ids) result.set(suspectId, (result.get(suspectId) ?? 0) + 24);
+    }
+    for (const lead of game.public_leads) result.set(lead.suspect_id, (result.get(lead.suspect_id) ?? 0) + 18);
+    for (const [playerId, score] of result) result.set(playerId, Math.min(100, score));
+    return result;
+  }, [game]);
+
   const actionCopy = role === "mafia" ? "습격할 시민" : role === "doctor" ? "치료할 사람" : "조사할 사람";
   const refinedActionCopy = role === "bodyguard" ? "경호할 사람" : actionCopy;
   const currentDirective = !game || game.phase === "lobby" ? "용의자를 모으고 모두 준비 상태인지 확인하세요."
@@ -794,6 +856,43 @@ export default function GamePage() {
     : game.phase === "verdict" ? (isAccused ? "도시의 최종 결정을 기다리세요." : "감정이 아닌 발언과 사건 기록을 근거로 판결하세요.")
     : game.phase === "gameover" ? "최종 사건 파일을 복기하고 다음 판의 전략을 세우세요."
     : "사건 보고를 확인하고 다음 단계에 대비하세요.";
+
+  const nextPhaseLabel = !game || game.phase === "lobby" ? PHASE_META.reveal[0]
+    : game.phase === "gameover" ? "재대결 또는 새 사건"
+      : game.phase === "result" ? "다음 밤 또는 사건 종료"
+        : (() => {
+            const index = PHASE_TRACK.indexOf(game.phase);
+            const next = index >= 0 ? PHASE_TRACK[index + 1] : undefined;
+            return next ? PHASE_META[next][0] : "다음 수사 단계";
+          })();
+  const objectiveView: "case" | "suspects" | "talk" | "role" = !game ? "suspects"
+    : game.phase === "reveal" ? "role"
+      : ["day", "defense"].includes(game.phase) ? "talk"
+        : ["result", "gameover"].includes(game.phase) ? "case"
+          : "suspects";
+  const objectiveActionLabel = !game ? "수사 열기"
+    : game.phase === "reveal" ? "내 역할 보기"
+      : game.phase === "night" ? "대상 선택"
+        : game.phase === "dawn" ? "타임라인 열기"
+          : game.phase === "day" ? "토론 열기"
+            : game.phase === "vote" ? "용의자 선택"
+              : game.phase === "defense" ? "변론 열기"
+                : game.phase === "verdict" ? "판결 열기"
+                  : "사건 기록 보기";
+  const focusCurrentObjective = useCallback(() => {
+    if (!game) return;
+    setMobileTab(objectiveView);
+    if (game.phase === "dawn") setInvestigationTool("timeline");
+    window.requestAnimationFrame(() => {
+      const selector = game.phase === "dawn" ? ".investigation-deck"
+        : ["night", "vote", "verdict"].includes(game.phase) ? ".action-bar"
+          : objectiveView === "talk" ? ".chat-card"
+            : objectiveView === "role" ? ".role-panel"
+              : objectiveView === "case" ? ".story-card"
+                : ".table-panel";
+      document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }, [game, objectiveView]);
 
   const installApp = async () => {
     if (!installPrompt) return;
@@ -1275,7 +1374,12 @@ export default function GamePage() {
         <h1>{phase[0]}</h1>
         <p><b>{game.case_profile.title}</b><span>{phase[1]}</span></p>
         <div className="phase-now" aria-live="polite"><i /><b>{PHASE_ALERT_META[game.phase].title}</b><span>{remaining > 0 ? `${remaining}초 남음` : game.phase === "lobby" ? "시작 대기 중" : "진행 중"}</span></div>
-        <div className="active-directive"><Crosshair size={13} /><span><small>ACTIVE DIRECTIVE</small><b>{currentDirective}</b></span></div>
+        <div className="case-command-center" aria-live="polite">
+          <div className="command-now"><span><i /><small>NOW</small></span><b>{phase[0]}</b><em>{remaining > 0 ? `${remaining}초` : game.phase === "lobby" ? "대기" : "진행"}</em></div>
+          <div className="command-objective"><Crosshair size={15} /><span><small>YOUR NEXT MOVE</small><b>{currentDirective}</b></span></div>
+          <div className="command-next"><small>NEXT</small><b>{nextPhaseLabel}</b></div>
+          <button type="button" onClick={focusCurrentObjective}>{objectiveActionLabel}<ChevronRight size={15} /></button>
+        </div>
         <div className="phase-track" aria-label="게임 진행 단계">
           {PHASE_TRACK.map((stage, index) => <div key={stage} className={`${game.phase === stage ? "active" : ""} ${phaseProgressIndex > index ? "done" : ""}`}><i /><span>{PHASE_META[stage][0]}</span></div>)}
         </div>
@@ -1301,10 +1405,26 @@ export default function GamePage() {
           )}
           {game.me.private_lead && game.phase !== "lobby" && <PrivateLeadCard lead={game.me.private_lead} canReveal={game.phase === "day" && game.me.alive} onReveal={() => send({ t: "reveal_lead", lead_id: game.me.private_lead?.id })} />}
           {game.phase === "reveal" && <MemorySealCard game={game} text={memoryText} setText={setMemoryText} onSubmit={submitMemory} />}
-          {["dawn", "day", "vote"].includes(game.phase) && <SceneReconstructionCard game={game} order={sceneOrder} setOrder={setSceneOrder} onSubmit={submitScene} />}
-          {["day", "vote", "gameover"].includes(game.phase) && <EvidenceChainCard game={game} target={theoryTarget} setTarget={setTheoryTarget} clueId={theoryClueId} setClueId={setTheoryClueId} fragmentId={theoryFragmentId} setFragmentId={setTheoryFragmentId} stake={theoryStake} setStake={setTheoryStake} onSubmit={submitTheory} />}
-          {game.phase === "day" && <OathCard game={game} target={oathTarget} setTarget={setOathTarget} text={oathText} setText={setOathText} onSubmit={submitOath} />}
-          {game.phase === "day" && <ContractCard game={game} target={contractTarget} setTarget={setContractTarget} text={contractText} setText={setContractText} onSubmit={submitContract} onResponse={(contractId, accepted) => send({ t: "contract_response", contract_id: contractId, accepted })} />}
+          {["dawn", "day", "vote", "gameover"].includes(game.phase) && (
+            <section className="investigation-deck">
+              <header className="investigation-deck-head">
+                <span><small>CASE WORKBENCH · DAY {game.round}</small><b>수사 도구 작업대</b></span>
+                <em>{game.me.scene_result ? "타임라인 봉인 완료" : game.phase === "gameover" ? "최종 가설 검토" : "필요한 도구만 펼쳐서 사용하세요"}</em>
+              </header>
+              <nav aria-label="수사 도구 선택">
+                {["dawn", "day", "vote"].includes(game.phase) && <button type="button" className={investigationTool === "timeline" ? "active" : ""} aria-pressed={investigationTool === "timeline"} onClick={() => setInvestigationTool("timeline")}><TimerReset size={14} /><span>타임라인</span>{game.me.scene_result && <Check size={12} />}</button>}
+                {["day", "vote", "gameover"].includes(game.phase) && <button type="button" className={investigationTool === "evidence" ? "active" : ""} aria-pressed={investigationTool === "evidence"} onClick={() => setInvestigationTool("evidence")}><Link2 size={14} /><span>증거 고리</span>{game.me.theory && <Check size={12} />}</button>}
+                {game.phase === "day" && <button type="button" className={investigationTool === "oath" ? "active" : ""} aria-pressed={investigationTool === "oath"} onClick={() => setInvestigationTool("oath")}><ShieldCheck size={14} /><span>공개 맹세</span></button>}
+                {game.phase === "day" && <button type="button" className={investigationTool === "contract" ? "active" : ""} aria-pressed={investigationTool === "contract"} onClick={() => setInvestigationTool("contract")}><Users size={14} /><span>비밀 계약</span></button>}
+              </nav>
+              <div className="investigation-deck-body">
+                {investigationTool === "timeline" && ["dawn", "day", "vote"].includes(game.phase) && <SceneReconstructionCard game={game} order={sceneOrder} setOrder={setSceneOrder} onSubmit={submitScene} />}
+                {investigationTool === "evidence" && ["day", "vote", "gameover"].includes(game.phase) && <EvidenceChainCard game={game} target={theoryTarget} setTarget={setTheoryTarget} clueId={theoryClueId} setClueId={setTheoryClueId} fragmentId={theoryFragmentId} setFragmentId={setTheoryFragmentId} stake={theoryStake} setStake={setTheoryStake} onSubmit={submitTheory} />}
+                {investigationTool === "oath" && game.phase === "day" && <OathCard game={game} target={oathTarget} setTarget={setOathTarget} text={oathText} setText={setOathText} onSubmit={submitOath} />}
+                {investigationTool === "contract" && game.phase === "day" && <ContractCard game={game} target={contractTarget} setTarget={setContractTarget} text={contractText} setText={setContractText} onSubmit={submitContract} onResponse={(contractId, accepted) => send({ t: "contract_response", contract_id: contractId, accepted })} />}
+              </div>
+            </section>
+          )}
           {!game.me.alive && !["spectator", "mafia"].includes(role) && <AfterlifePanel game={game} onPredict={(target) => send({ t: "ghost_predict", target })} ghostText={ghostText} setGhostText={setGhostText} onEcho={submitGhostEcho} />}
           {accusedPlayer && ["defense", "verdict"].includes(game.phase) && (
             <div className={`trial-stage trial-${game.phase}`}>
@@ -1371,12 +1491,8 @@ export default function GamePage() {
           <div className="reaction-layer" aria-live="polite">{game.reactions.map((reaction, index) => <div key={reaction.id} style={{ left: `${12 + (index * 17) % 74}%`, animationDelay: `${(index % 3) * .08}s` }}><b>{reaction.emoji}</b><span>{reaction.from}</span></div>)}</div>
           <div className="player-grid">
             {game.players.map((player, index) => {
-              const clueHeat = game.clues.filter((clue) => clue.suspect_ids.includes(player.id)).length * 24;
-              const leadHeat = game.public_leads.filter((lead) => lead.suspect_id === player.id).length * 18;
-              const readHeat = (game.read_summary[player.id]?.suspect ?? 0) * 12;
               const pressureCount = game.pressure_counts[player.id] ?? 0;
-              const suspicion = Math.min(100, clueHeat + leadHeat + readHeat + pressureCount * 16 + player.votes * 14);
-              return <PlayerCard key={player.id} player={player} index={index} self={player.id === game.me.id} host={player.id === game.host} accused={player.id === game.accused_id} selected={selected === player.id} selectable={targetPlayers.some((p) => p.id === player.id)} speaking={player.id === game.speaker_id} suspicion={suspicion} pressureCount={pressureCount} pressureMarkedByMe={game.me.pressure_target === player.id} canPressure={game.phase === "day" && game.me.alive && player.alive && player.id !== game.me.id && !game.me.pressure_target} mark={evidence[player.id] ?? 0} phase={game.phase} onSelect={() => setSelected(player.id)} onPressure={() => send({ t: "pressure", target: player.id })} />;
+              return <PlayerCard key={player.id} player={player} index={index} self={player.id === game.me.id} host={player.id === game.host} accused={player.id === game.accused_id} selected={selected === player.id} selectable={targetPlayerIds.has(player.id)} speaking={player.id === game.speaker_id} suspicion={suspicionByPlayer.get(player.id) ?? 0} pressureCount={pressureCount} pressureMarkedByMe={game.me.pressure_target === player.id} canPressure={game.phase === "day" && game.me.alive && player.alive && player.id !== game.me.id && !game.me.pressure_target} mark={evidence[player.id] ?? 0} phase={game.phase} onSelect={() => setSelected(player.id)} onPressure={() => send({ t: "pressure", target: player.id })} />;
             })}
             {game.phase === "lobby" && Array.from({ length: Math.max(0, game.min_players - game.players.length) }).map((_, i) => <div className="empty-seat" key={i}><span>+</span><p>빈자리</p></div>)}
           </div>
@@ -1435,7 +1551,7 @@ export default function GamePage() {
               </div>
             </div>
             <div className="chat-title"><div><MessageCircle size={16} /><b>{game.phase === "night" && role === "mafia" ? "마피아 비밀 채팅" : game.phase === "day" ? "자유 토론 채널" : "테이블 대화"}</b></div><span>{canChat ? (game.phase === "day" && isCurrentSpeaker ? "집중 발언 중" : "대화 가능") : "침묵 중"}</span></div>
-            <div className="chat-scroll">{game.chat.filter((msg) => !msg.from_id || !blockedPlayers.includes(msg.from_id)).length === 0 && <div className="empty-chat">표시할 대화가 없습니다.</div>}{game.chat.filter((msg) => !msg.from_id || !blockedPlayers.includes(msg.from_id)).map((msg) => <div className="chat-message" key={msg.id}><header><b>{msg.from}</b>{msg.from_id && msg.from_id !== game.me.id && <span><button onClick={() => setReportTarget({ id: msg.from_id!, name: msg.from })} aria-label={`${msg.from} 신고`}><Flag size={10} />신고</button><button onClick={() => blockPlayer(msg.from_id!, msg.from)} aria-label={`${msg.from} 차단`}><Ban size={10} />차단</button></span>}</header><p>{msg.text}</p></div>)}<div ref={chatEndRef} /></div>
+            <div className="chat-scroll">{visibleChat.length === 0 && <div className="empty-chat">표시할 대화가 없습니다.</div>}{visibleChat.map((msg) => <div className="chat-message" key={msg.id}><header><b>{msg.from}</b>{msg.from_id && msg.from_id !== game.me.id && <span><button onClick={() => setReportTarget({ id: msg.from_id!, name: msg.from })} aria-label={`${msg.from} 신고`}><Flag size={10} />신고</button><button onClick={() => blockPlayer(msg.from_id!, msg.from)} aria-label={`${msg.from} 차단`}><Ban size={10} />차단</button></span>}</header><p>{msg.text}</p></div>)}<div ref={chatEndRef} /></div>
             {canReact && <div className="reaction-dock" aria-label="빠른 리액션">{REACTION_EMOJIS.map((emoji) => <button key={emoji} onClick={() => send({ t: "react", emoji })} aria-label={`${emoji} 리액션 보내기`}>{emoji}</button>)}</div>}
             <form className="chat-form" onSubmit={submitChat}><input value={chatText} onChange={(e) => setChatText(e.target.value)} disabled={!canChat} placeholder={canChat ? (game.phase === "day" ? "발언 내용은 공개 기록으로 남습니다" : "메시지를 입력하세요") : game.phase === "day" ? "질문은 공개 심문 카드에서 보내세요" : "지금은 말할 수 없습니다"} maxLength={160} /><button disabled={!canChat || !chatText.trim()} aria-label="메시지 전송"><Send size={16} /></button></form>
           </div>
@@ -1446,6 +1562,7 @@ export default function GamePage() {
         {game.phase === "lobby" && game.host === game.me.id && game.lobby_mode === "first" && humanCount === 1 ? <button className="primary solo-dock-button" onClick={() => send({ t: "first_start" })}><BookOpen size={15} />첫 사건 시작</button> : game.phase === "lobby" && game.host === game.me.id && game.lobby_mode === "solo" && humanCount === 1 ? <button className="primary solo-dock-button" onClick={() => send({ t: "solo_start" })}><Bot size={15} />혼자 사건 시작</button> : game.phase === "lobby" && game.host === game.me.id && <button className="primary" disabled={game.players.length >= game.min_players && unreadyPlayers.length > 0} onClick={() => game.players.length < game.min_players ? send({ t: "fill_bots", target: game.min_players }) : send({ t: "start" })}>{game.players.length < game.min_players ? `AI ${game.min_players}명 채우기` : unreadyPlayers.length ? "준비 대기" : "게임 시작"}</button>}
         {game.phase === "lobby" && game.host !== game.me.id && <button className={me?.ready ? "" : "primary"} onClick={() => send({ t: "ready" })}>{me?.ready ? "준비 취소" : "준비하기"}</button>}
         {game.phase === "night" && game.me.alive && ["mafia", "doctor", "detective", "bodyguard"].includes(role) && <button className="primary" onClick={() => selected ? commitDecision("action") : setMobileTab("suspects")}>{selected ? "명령 봉인" : "대상 선택"}</button>}
+        {game.phase === "dawn" && <button className="primary" onClick={() => { setInvestigationTool("timeline"); setMobileTab("suspects"); }}>타임라인 복원</button>}
         {game.phase === "vote" && game.me.alive && <button className="danger" onClick={() => selected ? commitDecision("vote") : setMobileTab("suspects")}>{selected ? "표 봉인" : "용의자 선택"}</button>}
         {game.phase === "day" && <button onClick={() => setMobileTab("talk")}>{isCurrentSpeaker ? "내 진술 열기" : "토론 참여"}</button>}
         {game.phase === "defense" && <button onClick={() => setMobileTab("talk")}>{isAccused ? "최후 변론" : "변론 듣기"}</button>}

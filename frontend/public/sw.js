@@ -1,4 +1,4 @@
-const CACHE = "black-midnight-v6";
+const CACHE = "black-midnight-v7";
 const SHELL = [
   "/",
   "/manifest.webmanifest",
@@ -7,8 +7,8 @@ const SHELL = [
   "/icon-512.png",
   "/mafia-table-wide-v2.webp",
   "/mafia-table-mobile-v2.webp",
-  "/black-midnight-cinematic-wide-v1.png",
-  "/black-midnight-cinematic-mobile-v1.png",
+  "/black-midnight-cinematic-wide-v1.webp",
+  "/black-midnight-cinematic-mobile-v1.webp",
   "/evidence-token-atlas.webp",
   "/case-room-wide.webp",
   "/case-room-mobile.webp",
