@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from app.core.database import AsyncSessionLocal
+from app.core.config import settings
+from app.core.database import AsyncSessionLocal, engine
 from app.game import rooms
 from app.routes.leaderboard import router as leaderboard_router
 from app.routes.users import router as users_router
@@ -14,7 +15,12 @@ from app.routes.ws import router as ws_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
+    try:
+        yield
+    finally:
+        # Close pooled DB connections during rolling deploys so the managed
+        # Postgres instance does not retain half-open connections from old pods.
+        await engine.dispose()
 
 
 app = FastAPI(
@@ -83,5 +89,13 @@ async def public_status() -> JSONResponse:
             "players": rooms.online,
             "rooms": rooms.room_count,
             "active_matches": rooms.active_matches,
+            "limits": {
+                "max_connections_per_instance": settings.max_connections,
+                "max_rooms_per_instance": settings.max_rooms,
+            },
+            "headroom": {
+                "connections": max(settings.max_connections - rooms.online, 0),
+                "rooms": max(settings.max_rooms - rooms.room_count, 0),
+            },
         }
     )

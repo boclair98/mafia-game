@@ -561,7 +561,15 @@ export default function GamePage() {
         setWelcome(null);
         setGame(null);
         setJoined(false);
-        setNotice(reason === "room_full" ? "이 방은 정원이 가득 찼습니다. 다른 사건 코드를 선택해 주세요." : reason === "solo_room" ? "혼자 수사 전용 방입니다. 친구와 플레이하려면 친구 방을 새로 만들어 주세요." : "방장이 좌석을 정리했습니다. 새 사건에 다시 합류해 주세요.");
+        setNotice(
+          reason === "room_full"
+            ? "이 방은 정원이 가득 찼습니다. 다른 사건 코드를 선택해 주세요."
+            : reason === "solo_room"
+              ? "혼자 수사 전용 방입니다. 친구와 플레이하려면 친구 방을 새로 만들어 주세요."
+              : reason === "server_busy"
+                ? "현재 접속자가 많아 잠시 입장이 제한됩니다. 10초 후 다시 시도해 주세요."
+                : "방장이 좌석을 정리했습니다. 새 사건에 다시 합류해 주세요."
+        );
         window.setTimeout(() => setNotice(""), 4800);
       },
       onMessage: (raw) => {

@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from app.core.config import settings
+
 if TYPE_CHECKING:
     from fastapi import WebSocket
 else:
@@ -54,6 +56,10 @@ ROLE_NAMES = {
     "citizen": "시민",
     "spectator": "관전자",
 }
+
+
+class RoomCapacityError(RuntimeError):
+    """Raised when this API process has reached its room safety limit."""
 
 BOT_NAMES = ["루나", "검은고양이", "제로", "모카", "백야", "도윤", "비비", "하울"]
 BOT_PERSONAS = {
@@ -339,6 +345,8 @@ class Room:
         self._bot_marks: set[str] = set()
         self._bot_suspicions: dict[str, str] = {}
         self._task: asyncio.Task | None = None
+        self._broadcast_lock = asyncio.Lock()
+        self._last_broadcast_payloads: dict[str, str] = {}
         self.last_activity = time.time()
 
     def _record(self, line: str) -> None:
@@ -592,6 +600,9 @@ class Room:
             existing.nick = nick
             if coders_id is not None:
                 existing.coders_id = coders_id
+            # A resumed seat has a new socket and must receive a fresh snapshot
+            # even if the game state did not change while it reconnected.
+            self._last_broadcast_payloads.pop(existing.id, None)
             return existing, True
 
         if self.phase == "lobby" and len(self.players) < MAX_PLAYERS:
@@ -640,6 +651,7 @@ class Room:
         player.voice = False
         if self.phase == "lobby":
             self.players.pop(pid, None)
+            self._last_broadcast_payloads.pop(pid, None)
             self._record(f"{player.nick}님이 자리를 떠났습니다.")
             if self.host_id == pid:
                 self.host_id = next((p.id for p in self.players.values() if not p.is_bot), None)
@@ -2410,21 +2422,60 @@ class Room:
         }
 
     async def broadcast(self) -> None:
-        sends = []
-        for player in list(self.players.values()):
-            if player.connected and player.ws:
-                payload = json.dumps(self._state_for(player), ensure_ascii=False, separators=(",", ":"))
-                sends.append(player.ws.send_text(payload))
-        if sends:
-            await asyncio.gather(*sends, return_exceptions=True)
+        """Send changed snapshots without letting slow sockets pile up.
+
+        The ticker still runs once per second so phase deadlines remain precise,
+        but most ticks produce an identical state payload. Suppressing duplicate
+        frames cuts bandwidth and JSON work for large rooms. Each recipient has
+        its own cache because private roles and intel are viewer-specific.
+        """
+        async with self._broadcast_lock:
+            sends = []
+            for player in list(self.players.values()):
+                socket = player.ws
+                if not player.connected or socket is None:
+                    continue
+                payload = json.dumps(
+                    self._state_for(player),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                if self._last_broadcast_payloads.get(player.id) == payload:
+                    continue
+                self._last_broadcast_payloads[player.id] = payload
+
+                async def deliver(
+                    recipient: Player = player,
+                    recipient_socket: WebSocket = socket,
+                    snapshot: str = payload,
+                ) -> None:
+                    try:
+                        await asyncio.wait_for(
+                            recipient_socket.send_text(snapshot),
+                            timeout=settings.broadcast_timeout,
+                        )
+                    except Exception:
+                        # A dead/slow client must not hold up every other player.
+                        # Do not clear a socket that was already replaced by a
+                        # fast reconnect while this send was in flight.
+                        if recipient.ws is recipient_socket:
+                            recipient.connected = False
+                            recipient.ws = None
+
+                sends.append(deliver())
+            if sends:
+                await asyncio.gather(*sends, return_exceptions=True)
 
 
 class RoomManager:
-    def __init__(self) -> None:
+    def __init__(self, max_rooms: int | None = None) -> None:
         self._rooms: dict[str, Room] = {}
+        self.max_rooms = max_rooms or settings.max_rooms
 
     def get(self, name: str) -> Room:
         if name not in self._rooms:
+            if len(self._rooms) >= self.max_rooms:
+                raise RoomCapacityError("room_capacity")
             self._rooms[name] = Room(name)
         return self._rooms[name]
 

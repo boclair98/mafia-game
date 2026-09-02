@@ -4,7 +4,14 @@ import asyncio
 import json
 import time
 
-from app.game import CASE_TIMELINE, CASE_TIMELINE_LAYOUTS, Player, Room, RoomManager
+from app.game import (
+    CASE_TIMELINE,
+    CASE_TIMELINE_LAYOUTS,
+    Player,
+    Room,
+    RoomCapacityError,
+    RoomManager,
+)
 
 
 def player(pid: str, role: str = "citizen", *, bot: bool = False) -> Player:
@@ -603,3 +610,35 @@ def test_only_host_can_remove_another_lobby_seat():
     assert room.remove_lobby_seat("p1", "p4") is None
     assert "p4" not in room.players
     assert "방장" in room.case_log[-1]
+
+
+async def test_broadcast_suppresses_duplicate_snapshots_but_replays_changes():
+    class FakeSocket:
+        def __init__(self):
+            self.frames: list[str] = []
+
+        async def send_text(self, payload: str):
+            self.frames.append(payload)
+
+    room = Room("broadcast-test")
+    socket = FakeSocket()
+    room.join(socket, "Smoke", None, "broadcast-key-1234")
+
+    await room.broadcast()
+    await room.broadcast()
+    assert len(socket.frames) == 1
+
+    room._record("상태 변경")
+    await room.broadcast()
+    assert len(socket.frames) == 2
+
+
+def test_room_manager_rejects_new_rooms_at_process_limit():
+    manager = RoomManager(max_rooms=1)
+    manager.get("capacity-one")
+    try:
+        manager.get("capacity-two")
+    except RoomCapacityError:
+        pass
+    else:
+        raise AssertionError("room capacity should reject the second room")

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from app.core.config import settings
 from app.game import (
     MAX_PLAYERS,
+    RoomCapacityError,
     clean_nick,
     clean_player_key,
     clean_room_name,
@@ -46,7 +47,22 @@ async def game_socket(
     fallback = platform_name or f"익명-{secrets.token_hex(2)}"
     chosen_nick = clean_nick(platform_name or nick, fallback)
     player_key = clean_player_key(key)
-    arena = rooms.get(clean_room_name(room))
+    room_name = clean_room_name(room)
+    try:
+        arena = rooms.get(room_name)
+    except RoomCapacityError:
+        await ws.close(code=4006, reason="server_busy")
+        return
+
+    # A reconnect/resume replaces an existing seat and therefore does not
+    # consume another connection slot. New sockets are rejected with a
+    # retryable close code instead of allowing one hot process to run out of
+    # memory and take every room down with it.
+    known_seat = any(p.key == player_key for p in arena.players.values())
+    if not known_seat and rooms.online >= settings.max_connections:
+        rooms.sweep(room_name)
+        await ws.close(code=4006, reason="server_busy")
+        return
 
     if arena.phase == "lobby" and len(arena.players) >= MAX_PLAYERS and not any(
         p.key == player_key for p in arena.players.values()
