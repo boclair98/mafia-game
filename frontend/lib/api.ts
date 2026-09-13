@@ -34,6 +34,57 @@ export type GameStatus = {
   active_matches: number;
 };
 
+export type PassportMission = {
+  id: string;
+  title: string;
+  copy: string;
+  progress: number;
+  target: number;
+  complete: boolean;
+};
+
+export type PassportBadge = {
+  id: string;
+  title: string;
+  copy: string;
+  unlocked: boolean;
+};
+
+export type PassportCase = {
+  id: string;
+  case_code: string;
+  case_title: string;
+  mode: "solo" | "party" | string;
+  winner: string;
+  score: number;
+  grade: string;
+  xp_earned: number;
+  timeline_score: number;
+  social_actions: number;
+  badges: string[];
+  completed_at: string;
+};
+
+export type Passport = {
+  investigator: {
+    display_name: string;
+    level: number;
+    xp: number;
+    level_xp: number;
+    next_level_xp: number;
+    cases_played: number;
+    cases_won: number;
+    solo_cases: number;
+    party_cases: number;
+    best_score: number;
+    current_streak: number;
+    best_streak: number;
+  };
+  daily_missions: PassportMission[];
+  badges: PassportBadge[];
+  recent_cases: PassportCase[];
+};
+
 export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
   return tracked(async () => {
     const r = await fetch(apiUrl("/api/leaderboard"), { credentials: "include" });
@@ -45,6 +96,14 @@ export async function fetchLeaderboard(): Promise<LeaderboardEntry[]> {
 export async function fetchGameStatus(): Promise<GameStatus | null> {
   return tracked(async () => {
     const r = await fetch(apiUrl("/api/status"), { credentials: "include" });
+    if (!r.ok) return null;
+    return r.json();
+  });
+}
+
+export async function fetchPassport(): Promise<Passport | null> {
+  return tracked(async () => {
+    const r = await fetch(apiUrl("/api/passport"), { credentials: "include" });
     if (!r.ok) return null;
     return r.json();
   });

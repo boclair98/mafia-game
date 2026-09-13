@@ -11,8 +11,12 @@
 
 별도 설치나 회원가입 없이 브라우저에서 바로 플레이할 수 있고, 친구 방·AI 혼자 수사·초보자용 첫 사건을 모두 제공합니다.
 
+이번 버전은 결제를 서두르지 않고 **수사관 패스포트**를 먼저 도입했습니다. 로그인한 플레이어의 완주 사건·XP·연속 출석·일일 목표·배지를 서버에 기록해 다음 플레이를 만들고, 향후 외형·시즌·호스트 편의 상품을 공정하게 연결할 수 있는 기반입니다.
+
 **라이브 서비스:** [black-midnight.coders.kr](https://black-midnight.coders.kr)<br />
 **GitHub:** [boclair98/mafia-game](https://github.com/boclair98/mafia-game)
+
+**저장소 토폴로지:** upstream은 `boclair98/mafia-game`, 공개 조직 미러는 실제 fork인 [`coders-kr/mafia-game`](https://github.com/coders-kr/mafia-game)입니다. 배포 소스는 항상 upstream입니다.
 
 ![봉인 문서와 증거물로 구성한 검은 자정 사건 현장](frontend/public/black-midnight-cinematic-wide-v1.webp)
 
@@ -47,7 +51,7 @@
 | 네이티브 셸 | Capacitor Android / iOS 프로젝트 포함 |
 | 실시간 통신 | FastAPI WebSocket |
 | 음성 채팅 | WebRTC P2P, 서버는 시그널링만 중계 |
-| 영속 데이터 | PostgreSQL 기반 사용자 최고 점수·리더보드 |
+| 영속 데이터 | PostgreSQL 기반 사용자·최고 점수·수사관 패스포트·사건 보관소 |
 | 방 상태 | 현재 인스턴스 메모리에서 관리 |
 | 운영 배포 | Docker + coders.kr |
 
@@ -71,6 +75,17 @@
 1. 10분 안에 초보자가 “현재 단계와 내가 할 일”을 말할 수 있어야 합니다.
 2. 게임 종료 후 승패의 이유를 사건 파일에서 다시 설명할 수 있어야 합니다.
 3. 한 명만 접속해도 AI 사건을 시작하고, 친구가 들어오면 같은 규칙으로 이어갈 수 있어야 합니다.
+
+### 수사관 패스포트 (Retention Foundation)
+
+게임이 끝날 때 서버가 플레이어별 결과를 한 번만 기록합니다. 역할 능력이나 승패를 판매하지 않고, 다음 네 가지를 누적해 재방문 이유를 만듭니다.
+
+- **XP·레벨:** 참여, 타임라인 복원, 사회적 상호작용, 승리에 따라 서버에서 계산합니다.
+- **일일 사건 목표:** 사건 완주·증거 연결·심문 기록을 매일 새로 제시합니다.
+- **배지:** 첫 사건, 타임라인 분석, 소셜 추리, 솔로 완주, 연속 출석을 해금합니다.
+- **사건 보관소:** 사건 코드·등급·점수·승리 팀·획득 XP를 최근 기록으로 다시 볼 수 있습니다.
+
+패스포트 조회는 인증이 필요한 `GET /api/passport`이며, 브라우저가 XP나 배지를 직접 제출하는 쓰기 API는 제공하지 않습니다. 이 경계를 유지하면 추후 판매 가능한 상품을 프로필 테마·사건 파일 스킨·시즌 패스·호스트 편의 기능처럼 **비경쟁적(entitlement) 상품**으로 한정할 수 있습니다. 실제 결제·환불·구매 검증은 별도의 Stripe 또는 스토어 결제 연동 단계에서 서버 권위로 추가할 예정이며 현재는 결제 상품을 판매하지 않습니다.
 
 ## 왜 만들었는가
 
@@ -284,7 +299,8 @@
                                                   ▼
                                    ┌──────────────────────────┐
                                    │ PostgreSQL                │
-                                   │ users / best scores       │
+                                   │ users / scores / passport  │
+                                   │ case_runs / badges        │
                                    └──────────────────────────┘
 
 Browser peers ◀──────── WebRTC audio (P2P) ────────▶ Browser peers
@@ -366,9 +382,12 @@ mafia-game/
 │  │  └─ routes/
 │  │     ├─ ws.py              # /api/ws 실시간 방 프로토콜
 │  │     ├─ users.py           # 사용자/식별 endpoint
-│  │     └─ leaderboard.py     # 최고 점수와 리더보드
+│  │     ├─ leaderboard.py     # 최고 점수와 리더보드
+│  │     └─ passport.py        # 수사관 패스포트 조회 API
+│  ├─ services/
+│  │  └─ passport.py           # XP·배지·일일 목표·사건 기록 서비스
 │  ├─ tests/                   # 규칙·WebSocket·DB·CORS 테스트
-│  ├─ alembic/                 # DB migration
+│  ├─ alembic/                 # DB migration (0001 → 0002 passport)
 │  ├─ pyproject.toml
 │  ├─ uv.lock
 │  └─ Dockerfile
@@ -434,6 +453,25 @@ uvicorn app.main:app --reload --port 8000
 
 .env.example을 .env로 복사해 DATABASE_URL과 로컬 DEV_FAKE_USER를 설정할 수 있습니다.
 
+### 환경 변수
+
+| 이름 | 용도 | 필수 | 발급·설정 위치 |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | PostgreSQL 연결 문자열 | 운영 필수 | coders.yaml의 관리형 DB 치환값 또는 로컬 `.env` |
+| `DEV_FAKE_USER` | 플랫폼 로그인 없는 로컬 테스트용 UUID | 로컬 선택 | `.env`에만 설정, 운영에서는 비워 둠 |
+| `DATABASE_POOL_SIZE` / `DATABASE_MAX_OVERFLOW` | API 인스턴스별 DB 연결 예산 | 선택 | replica 수와 DB 한도에 맞춰 운영 환경 변수로 설정 |
+| `MAX_ROOMS` / `MAX_CONNECTIONS` | 프로세스별 방·WebSocket 상한 | 선택 | 부하 테스트 후 운영 환경 변수로 설정 |
+| `BROADCAST_TIMEOUT` / `LEADERBOARD_CACHE_TTL` | 브로드캐스트 타임아웃·리더보드 캐시 | 선택 | 운영 환경 변수로 설정 |
+
+실제 토큰·비밀번호·쿠키는 저장소나 README에 넣지 않습니다. coders.kr 배포 인증은 승인된 로컬 secret 저장소에서만 읽습니다.
+
+기존 데이터베이스를 업데이트할 때는 백엔드 가상환경에서 마이그레이션을 적용합니다.
+
+~~~bash
+cd backend
+alembic upgrade head
+~~~
+
 ## 테스트와 품질 검사
 
 ### 프런트엔드
@@ -490,6 +528,8 @@ ws://localhost:8000/api/ws?room=<room-code>&nick=<display-name>&key=<resume-key>
 | ghost_predict, ghost_echo, will | 사망자 사후 수사와 유언 |
 | voice_presence, voice_signal | 음성 참여 상태와 WebRTC 협상 |
 
+`GET /api/passport`는 로그인한 사용자만 호출할 수 있으며(익명 요청은 401), XP·일일 목표·배지·최근 사건을 반환합니다. 사건 종료 결과는 WebSocket 게임 서버가 내부적으로 기록하므로 클라이언트가 점수를 위조할 수 없습니다.
+
 서버는 연결된 참가자마다 다른 state 메시지를 생성합니다. 마피아 팀 정보, 탐정 조사 결과, 개인 증거와 밤 행동은 권한이 없는 참가자에게 포함하지 않습니다.
 
 ## 배포
@@ -512,11 +552,13 @@ ws://localhost:8000/api/ws?room=<room-code>&nick=<display-name>&key=<resume-key>
 https://black-midnight.coders.kr
 ~~~
 
+배포 순서는 `boclair98/mafia-game`에 검증된 커밋을 먼저 push한 뒤, `coders-kr/mafia-game` 실제 fork의 `main`을 upstream과 동기화하고, coders.kr 프로젝트 `black-midnight`를 upstream 저장소 URL로 재배포하는 방식입니다. Coders.kr API가 반환하는 `last_deployment.status`가 `ready`가 될 때까지 10~15초 간격으로 확인합니다. 배포 토큰은 로컬 secret 저장소에서만 읽고 출력하지 않습니다.
+
 배포 전 확인 목록은 [스토어 출시 체크리스트](docs/STORE_RELEASE_CHECKLIST.md)를 참고하세요.
 
 ## 현재 한계와 다음 단계
 
-현재 버전은 플레이 가능한 서비스와 핵심 추리 루프를 제공하며, 이번 커밋에서 인스턴스 단위의 운영 안전장치를 적용했습니다. 실제 대규모 런칭 전에 아래 항목을 보강해야 합니다.
+현재 버전은 플레이 가능한 서비스와 핵심 추리 루프, 수사관 패스포트 기반을 제공합니다. 결제는 아직 연결하지 않았으며, 실제 대규모 런칭 전에 아래 항목을 보강해야 합니다.
 
 ### 데이터와 확장성
 
@@ -544,7 +586,16 @@ https://black-midnight.coders.kr
 - AI 용의자의 장기 기억과 플레이어 관계 변화 고도화
 - 사건 리플레이 공유, 시즌 기록, 외형 중심의 꾸미기 보상
 
-능력치나 승률을 유료로 판매하지 않고, 과금이 필요해질 경우 연출·프로필·사건 파일 테마처럼 공정성에 영향을 주지 않는 요소부터 검토합니다.
+### 수익화 로드맵 (결제 전 단계)
+
+수익화의 전제는 플레이어가 먼저 매일 돌아오고, 친구를 초대하고, 자신의 기록을 자랑할 이유를 갖는 것입니다. 그래서 현재 릴리스에서는 다음 순서만 구현합니다.
+
+1. **지금:** 패스포트·일일 목표·배지·사건 보관소로 반복 플레이와 공유 가능한 기록을 만든다.
+2. **다음:** 시즌별 사건 묶음, 프로필 프레임·음성 연출·사건 파일 스킨 같은 외형 인벤토리를 안정적인 ID로 도입한다.
+3. **그 다음:** 파티 방장용 편의 기능(커스텀 타이머·리플레이·방 템플릿)을 유료 entitlement로 검토한다.
+4. **결제 연동 시:** Stripe/스토어 결제 검증, webhook 멱등 처리, 환불·회수, 구매 복구를 서버에서 구현하고 운영 로그를 남긴다.
+
+역할 능력, 정보 공개, 승률, 매칭 우선권은 판매 대상에서 제외합니다. 가격·상품을 확정하기 전에는 결제 버튼이나 가짜 구매 상태를 노출하지 않습니다.
 
 ## 운영·개인정보 문서
 

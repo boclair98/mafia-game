@@ -2111,12 +2111,37 @@ class Room:
     async def _persist_scores(self) -> None:
         """Persist every signed-in participant as soon as a match ends."""
         from app.routes.leaderboard import persist_best_score
+        from app.services.passport import CaseResult
 
-        writes = [
-            persist_best_score(player.coders_id, player.nick, player.score)
-            for player in self.players.values()
-            if player.coders_id is not None and player.score > 0
-        ]
+        def social_actions_for(player_id: str) -> int:
+            questions = sum(1 for item in self.questions if item.get("from_id") == player_id)
+            claims = sum(1 for item in self.claims if item.get("speaker_id") == player_id)
+            oaths = sum(1 for item in self.oaths.values() if item.get("owner_id") == player_id)
+            contracts = sum(1 for item in self.contracts.values() if item.get("owner_id") == player_id)
+            echoes = sum(1 for item in self.ghost_echoes if item.get("owner_id") == player_id)
+            return min(20, questions + claims + oaths + contracts + echoes)
+
+        writes = []
+        for player in self.players.values():
+            if player.coders_id is None or player.score <= 0 or player.role == "spectator":
+                continue
+            won = (self.winner == "mafia" and player.role == "mafia") or (
+                self.winner == "citizen" and player.role not in {"mafia", "trickster", "spectator"}
+            ) or (self.winner == "trickster" and player.role == "trickster")
+            scene_score = int((self.scene_results.get(player.id) or {}).get("score", 0))
+            result = CaseResult(
+                case_code=str(self.case_profile.get("code", "BM-000")),
+                case_title=str(self.case_profile.get("title", "검은 자정 사건")),
+                mode="solo" if self.mode == "solo" else "party",
+                winner=str(self.winner or "unknown"),
+                score=int(player.score),
+                grade=str(self.case_grade or "C"),
+                won=won,
+                timeline_score=scene_score,
+                social_actions=social_actions_for(player.id),
+                badges=tuple(str(item.get("id")) for item in self.case_badges if item.get("id")),
+            )
+            writes.append(persist_best_score(player.coders_id, player.nick, player.score, case_result=result))
         if writes:
             await asyncio.gather(*writes, return_exceptions=True)
 

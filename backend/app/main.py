@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal, engine
 from app.game import rooms
 from app.routes.leaderboard import router as leaderboard_router
+from app.routes.passport import router as passport_router
 from app.routes.users import router as users_router
 from app.routes.ws import router as ws_router
 
@@ -51,6 +52,7 @@ app.add_middleware(
 
 app.include_router(users_router)
 app.include_router(leaderboard_router)
+app.include_router(passport_router)
 app.include_router(ws_router)
 
 

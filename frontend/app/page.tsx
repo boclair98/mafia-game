@@ -9,7 +9,7 @@ import {
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { GameState, PlayerState, Role, WelcomeMsg } from "@/lib/game";
-import { fetchGameStatus, fetchLeaderboard, type GameStatus, type LeaderboardEntry } from "@/lib/api";
+import { fetchGameStatus, fetchLeaderboard, fetchPassport, type GameStatus, type LeaderboardEntry, type Passport } from "@/lib/api";
 import { signInHref, useMe } from "@/lib/identity";
 import { getActiveChapter, getCaseNarrative, getEndingLine, getNarrativeLine, type CaseNarrative } from "@/lib/narrative";
 import { VoiceRoom, type VoiceSignal } from "@/lib/voice";
@@ -187,6 +187,8 @@ export default function GamePage() {
   const [caseOpen, setCaseOpen] = useState(false);
   const [rankingOpen, setRankingOpen] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [passportOpen, setPassportOpen] = useState(false);
+  const [passport, setPassport] = useState<Passport | null>(null);
   const [networkStatus, setNetworkStatus] = useState<GameStatus | null>(null);
   const [voiceOn, setVoiceOn] = useState(true);
   const [voiceChatOn, setVoiceChatOn] = useState(false);
@@ -311,9 +313,19 @@ export default function GamePage() {
   }, []);
 
   useEffect(() => {
+    if (!identity?.coders_id) {
+      return;
+    }
+    let active = true;
+    fetchPassport().then((data) => { if (active) setPassport(data); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [identity?.coders_id]);
+
+  useEffect(() => {
     if (game?.phase !== "gameover") return;
     const timer = window.setTimeout(() => {
       fetchLeaderboard().then(setLeaderboard).catch(() => undefined);
+      fetchPassport().then(setPassport).catch(() => undefined);
     }, 900);
     return () => window.clearTimeout(timer);
   }, [game?.phase]);
@@ -325,7 +337,7 @@ export default function GamePage() {
   }, [joined]);
 
   useEffect(() => {
-    const modalOpen = joinOpen || tutorialOpen || inviteOpen || caseOpen || rankingOpen || settingsOpen || Boolean(legalPage) || Boolean(reportTarget);
+    const modalOpen = joinOpen || tutorialOpen || inviteOpen || caseOpen || rankingOpen || passportOpen || settingsOpen || Boolean(legalPage) || Boolean(reportTarget);
     if (!modalOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -337,6 +349,7 @@ export default function GamePage() {
       else if (legalPage) setLegalPage(null);
       else if (settingsOpen) setSettingsOpen(false);
       else if (rankingOpen) setRankingOpen(false);
+      else if (passportOpen) setPassportOpen(false);
       else if (inviteOpen) setInviteOpen(false);
       else if (tutorialOpen) {
         localStorage.setItem("black-midnight:tutorial-seen", "1");
@@ -348,7 +361,7 @@ export default function GamePage() {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", closeTopModal);
     };
-  }, [caseOpen, inviteOpen, joinOpen, legalPage, rankingOpen, reportTarget, settingsOpen, tutorialOpen]);
+  }, [caseOpen, inviteOpen, joinOpen, legalPage, passportOpen, rankingOpen, reportTarget, settingsOpen, tutorialOpen]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1222,8 +1235,9 @@ export default function GamePage() {
             <button type="button" onClick={() => document.querySelector("#case-world")?.scrollIntoView({ behavior: "smooth" })}>게임 소개</button>
             <button type="button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}>플레이 가이드</button>
             <button type="button" onClick={() => setRankingOpen(true)}>기록 보관소</button>
+            <button type="button" onClick={() => setPassportOpen(true)}><Award size={14} />수사관 패스포트</button>
           </nav>
-          <div className="campaign-status"><i />{networkStatus ? `${networkStatus.players}명 수사 중` : "LIVE"}</div>
+          <div className="campaign-status"><i />{networkStatus ? `${networkStatus.players}명 수사 중` : "LIVE"}<button className="campaign-passport" type="button" onClick={() => setPassportOpen(true)}><Award size={14} /><span>패스포트</span></button></div>
           <button className="campaign-settings" onClick={() => setSettingsOpen(true)} aria-label="설정과 운영 정책"><Settings size={18} /></button>
         </header>
 
@@ -1298,6 +1312,7 @@ export default function GamePage() {
         </div>}
         {tutorialOpen && <TutorialModal step={tutorialStep} setStep={setTutorialStep} onClose={closeTutorial} />}
         {rankingOpen && <RankingModal entries={leaderboard} signedIn={Boolean(identity)} onClose={() => setRankingOpen(false)} />}
+        {passportOpen && <PassportModal passport={passport} signedIn={Boolean(identity)} onClose={() => setPassportOpen(false)} />}
         {settingsOpen && <SettingsModal voiceOn={voiceOn} soundOn={soundOn} onVoice={toggleVoice} onSound={toggleSound} onLegal={setLegalPage} onClose={() => setSettingsOpen(false)} />}
         {legalPage && <LegalModal page={legalPage} onClose={() => setLegalPage(null)} />}
       </main>
@@ -1374,7 +1389,7 @@ export default function GamePage() {
         </div>
       )}
       <header className="topbar">
-        <div className="mini-brand"><Moon size={18} fill="currentColor" /><span>검은 자정</span><button className="guide-button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}><Film size={13} />룰 안내</button><button className="guide-button" onClick={() => setRankingOpen(true)}><Trophy size={13} />랭킹</button><button className="guide-button" onClick={() => setSettingsOpen(true)}><Settings size={13} />설정</button></div>
+        <div className="mini-brand"><Moon size={18} fill="currentColor" /><span>검은 자정</span><button className="guide-button" onClick={() => { setTutorialStep(0); setTutorialOpen(true); }}><Film size={13} />룰 안내</button><button className="guide-button" onClick={() => setRankingOpen(true)}><Trophy size={13} />랭킹</button><button className="guide-button passport-guide-button" onClick={() => setPassportOpen(true)}><Award size={13} />패스포트</button><button className="guide-button" onClick={() => setSettingsOpen(true)}><Settings size={13} />설정</button></div>
         <div className="room-pill"><span>ROOM</span><b>{room}</b><button onClick={copyInvite} aria-label="초대 링크 복사">{copied ? <Check size={15} /> : <Clipboard size={15} />}</button><button onClick={() => setInviteOpen(true)} aria-label="친구 초대 열기"><UserPlus size={15} /></button></div>
         <div className={`connection ${status}`}><i />{status === "open" ? `${game.players.filter((p) => p.connected).length}명 접속` : "재연결 중"}</div>
       </header>
@@ -1592,6 +1607,7 @@ export default function GamePage() {
       {inviteOpen && <InviteModal room={room} online={game.players.filter((player) => player.connected).length} copied={copied} onClose={() => setInviteOpen(false)} onCopy={copyInvite} onShare={shareInvite} onPoster={() => createPoster("invite")} />}
       {caseOpen && <CaseFileModal game={game} room={room} onClose={() => setCaseOpen(false)} onCopy={copyCaseFile} />}
       {rankingOpen && <RankingModal entries={leaderboard} signedIn={Boolean(identity)} onClose={() => setRankingOpen(false)} />}
+      {passportOpen && <PassportModal passport={passport} signedIn={Boolean(identity)} onClose={() => setPassportOpen(false)} />}
       {settingsOpen && <SettingsModal voiceOn={voiceOn} soundOn={soundOn} onVoice={toggleVoice} onSound={toggleSound} onLegal={setLegalPage} onClose={() => setSettingsOpen(false)} />}
       {legalPage && <LegalModal page={legalPage} onClose={() => setLegalPage(null)} />}
       {reportTarget && <ReportModal target={reportTarget.name} reason={reportReason} setReason={setReportReason} onSubmit={submitReport} onBlock={() => { blockPlayer(reportTarget.id, reportTarget.name); setReportTarget(null); }} onClose={() => setReportTarget(null)} />}
@@ -1779,6 +1795,48 @@ function RankingModal({ entries, signedIn, onClose }: { entries: LeaderboardEntr
         <header><Trophy size={28} /><span>BLACK MIDNIGHT / SEASON RANKING</span><h2>명예의 전당</h2><p>로그인 플레이어의 최고 사건 점수가 기록됩니다.</p></header>
         <div className="ranking-list">{entries.length === 0 && <div className="ranking-empty">아직 기록된 요원이 없습니다.<br />첫 번째 사건을 해결해 이름을 남겨보세요.</div>}{entries.slice(0, 10).map((entry, index) => <div className={index < 3 ? `podium rank-${index + 1}` : ""} key={`${entry.name}-${index}`}><b>{String(index + 1).padStart(2, "0")}</b><span><strong>{entry.name}</strong><small>{new Date(entry.updated_at).toLocaleDateString("ko-KR")} 갱신</small></span><em>{entry.best_score} PTS</em></div>)}</div>
         {!signedIn && <a className="ranking-signin" href={signInHref()}>로그인하고 내 최고 점수 기록하기</a>}
+      </section>
+    </div>
+  );
+}
+
+function PassportModal({ passport, signedIn, onClose }: { passport: Passport | null; signedIn: boolean; onClose: () => void }) {
+  const investigator = passport?.investigator;
+  const xpPercent = investigator
+    ? Math.min(100, Math.round((investigator.level_xp / Math.max(1, investigator.next_level_xp)) * 100))
+    : 0;
+  const winnerLabel = (winner: string) => winner === "mafia" ? "마피아 팀" : winner === "trickster" ? "광대 단독" : winner === "citizen" ? "시민 팀" : "미정";
+  const modeLabel = (mode: string) => mode === "solo" ? "혼자 수사" : "친구와 함께";
+  return (
+    <div className="passport-backdrop" role="dialog" aria-modal="true" aria-label="수사관 패스포트" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="passport-modal">
+        <button className="passport-close" type="button" onClick={onClose} aria-label="패스포트 닫기"><X size={19} /></button>
+        <header className="passport-header">
+          <div className="passport-header-icon"><Award size={24} /></div>
+          <div><span>BLACK MIDNIGHT / INVESTIGATOR ID</span><h2>수사관 패스포트</h2><p>사건을 끝낼수록 다음 사건의 문이 열립니다. XP와 배지는 공정한 플레이만으로 쌓입니다.</p></div>
+        </header>
+        {!signedIn ? (
+          <div className="passport-gate"><LockKeyhole size={27} /><h3>기록을 봉인하려면 로그인하세요</h3><p>게스트도 모든 사건을 플레이할 수 있지만, 로그인하면 일일 목표·연속 출석·사건 보관소가 다음 기기에서도 이어집니다.</p><a className="primary-button" href={signInHref()}>로그인하고 패스포트 열기 <ChevronRight size={16} /></a></div>
+        ) : !passport || !investigator ? (
+          <div className="passport-loading"><Sparkles size={20} />패스포트 기록을 불러오는 중…</div>
+        ) : (
+          <div className="passport-body">
+            <section className="passport-hero">
+              <div className="passport-rank-mark"><small>FIELD RANK</small><b>{String(investigator.level).padStart(2, "0")}</b><span>LV</span></div>
+              <div className="passport-hero-copy"><span>수사관 {investigator.display_name}</span><h3>레벨 {investigator.level} · {investigator.current_streak > 0 ? `${investigator.current_streak}일 연속 출석 중` : "첫 사건을 기다리는 중"}</h3><p>다음 레벨까지 {Math.max(0, investigator.next_level_xp - investigator.level_xp)} XP</p><div className="passport-xp-bar"><i style={{ width: `${xpPercent}%` }} /></div><small>{investigator.level_xp} / {investigator.next_level_xp} XP</small></div>
+            </section>
+            <div className="passport-stats">
+              <div><small>완주 사건</small><b>{investigator.cases_played}</b><span>끝까지 닫은 파일</span></div>
+              <div><small>승리 사건</small><b>{investigator.cases_won}</b><span>승률 {investigator.cases_played ? Math.round((investigator.cases_won / investigator.cases_played) * 100) : 0}%</span></div>
+              <div><small>최고 점수</small><b>{investigator.best_score}</b><span>명예의 전당 기준</span></div>
+              <div><small>최장 출석</small><b>{investigator.best_streak}일</b><span>다시 돌아온 기록</span></div>
+            </div>
+            <section className="passport-section passport-missions"><div className="passport-section-heading"><span><Sparkles size={15} />TODAY&apos;S CASEWORK</span><small>매일 00:00 UTC 갱신</small></div><h3>오늘의 사건 목표</h3><div className="passport-mission-list">{passport.daily_missions.map((mission) => <article key={mission.id} className={mission.complete ? "complete" : ""}><span className="passport-mission-check">{mission.complete ? <Check size={15} /> : <span>{mission.progress}/{mission.target}</span>}</span><div><b>{mission.title}</b><p>{mission.copy}</p></div><em>{mission.complete ? "완료" : `${mission.progress}/${mission.target}`}</em></article>)}</div></section>
+            <section className="passport-section"><div className="passport-section-heading"><span><Award size={15} />BADGE CASE</span><small>{passport.badges.filter((badge) => badge.unlocked).length}/{passport.badges.length} 해금</small></div><h3>수사 배지</h3><div className="passport-badges">{passport.badges.map((badge) => <article key={badge.id} className={badge.unlocked ? "unlocked" : "locked"}>{badge.unlocked ? <Award size={18} /> : <LockKeyhole size={17} />}<div><b>{badge.title}</b><p>{badge.copy}</p></div></article>)}</div></section>
+            <section className="passport-section passport-recent"><div className="passport-section-heading"><span><BookOpen size={15} />CASE ARCHIVE</span><small>최근 {passport.recent_cases.length}건</small></div><h3>최근 사건 기록</h3>{passport.recent_cases.length === 0 ? <div className="passport-empty"><BookOpen size={22} /><p>아직 닫힌 사건 파일이 없습니다.<br />첫 사건을 완주하면 이곳에 기록됩니다.</p></div> : <div className="passport-case-list">{passport.recent_cases.map((run) => <article key={run.id}><div className="passport-case-grade">{run.grade}</div><div className="passport-case-copy"><b>{run.case_title}</b><span>{run.case_code} · {modeLabel(run.mode)} · {new Date(run.completed_at).toLocaleDateString("ko-KR")}</span></div><div className="passport-case-score"><b>{run.score} PTS</b><small>{winnerLabel(run.winner)} · +{run.xp_earned} XP</small></div></article>)}</div>}</section>
+            <p className="passport-footnote"><LockKeyhole size={13} />현재 패스포트는 순수 진행 기록입니다. 이후 추가될 외형·시즌·호스트 기능도 승패나 역할 능력에는 영향을 주지 않습니다.</p>
+          </div>
+        )}
       </section>
     </div>
   );

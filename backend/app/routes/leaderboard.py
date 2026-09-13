@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_session
 from app.models import Score, User
 from app.routes.users import upsert_local_user
+from app.services.passport import CaseResult, record_case_result
 
 router = APIRouter(prefix="/api", tags=["leaderboard"])
 
@@ -68,7 +69,11 @@ async def leaderboard(
 
 
 async def persist_best_score(
-    coders_id: UUID, platform_name: str | None, score: int
+    coders_id: UUID,
+    platform_name: str | None,
+    score: int,
+    *,
+    case_result: CaseResult | None = None,
 ) -> None:
     """Upsert the player's best score at session end.
 
@@ -94,6 +99,8 @@ async def persist_best_score(
                     },
                 )
             )
+            if case_result is not None:
+                await record_case_result(session, user, case_result)
 
     # A finished match should be visible quickly, while reads between matches
     # are served from the short TTL cache instead of opening a DB connection.
