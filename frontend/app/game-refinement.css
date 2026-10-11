@@ -326,3 +326,5 @@
 .tutorial-copy > p { font-size:16px; line-height:1.8; color:#c9c5bb; word-break:keep-all; }
 .tutorial-film button { min-height:44px; min-width:44px; }
 .tutorial-copy > small { font-size:11px; }
+
+.game-shell .player-info strong { white-space:normal; overflow:visible; text-overflow:clip; overflow-wrap:anywhere; word-break:keep-all; }

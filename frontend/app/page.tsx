@@ -947,7 +947,8 @@ export default function GamePage() {
     if (game.phase === "dawn") setInvestigationTool("timeline");
     window.requestAnimationFrame(() => {
       const selector = game.phase === "dawn" ? ".investigation-deck"
-        : ["night", "vote", "verdict"].includes(game.phase) ? ".action-bar"
+        : ["night", "vote"].includes(game.phase) ? ".player-grid"
+          : game.phase === "verdict" ? ".action-bar"
           : objectiveView === "talk" ? ".chat-card"
             : objectiveView === "role" ? ".role-panel"
               : objectiveView === "case" ? ".story-card"
@@ -955,6 +956,11 @@ export default function GamePage() {
       document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
   }, [game, objectiveView]);
+
+  const focusTargets = () => {
+    setMobileTab("suspects");
+    window.requestAnimationFrame(() => document.querySelector(".player-grid")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }));
+  };
 
   const installApp = async () => {
     if (!installPrompt) return;
@@ -1593,9 +1599,9 @@ export default function GamePage() {
         <span><small>{PHASE_META[game.phase][0]} · {game.phase === "night" ? "NIGHT ORDER" : game.phase === "vote" ? "SEALED BALLOT" : game.phase === "verdict" ? "FINAL VERDICT" : "CURRENT OBJECTIVE"}</small><b>{remaining > 0 ? `${remaining}초 · ` : ""}{currentDirective}</b></span>
         {game.phase === "lobby" && game.host === game.me.id && game.lobby_mode === "first" && humanCount === 1 ? <button className="primary solo-dock-button" onClick={() => send({ t: "first_start" })}><BookOpen size={15} />첫 사건 시작</button> : game.phase === "lobby" && game.host === game.me.id && game.lobby_mode === "solo" && humanCount === 1 ? <button className="primary solo-dock-button" onClick={() => send({ t: "solo_start" })}><Bot size={15} />혼자 사건 시작</button> : game.phase === "lobby" && game.host === game.me.id && <button className="primary" disabled={game.players.length >= game.min_players && unreadyPlayers.length > 0} onClick={() => game.players.length < game.min_players ? send({ t: "fill_bots", target: game.min_players }) : send({ t: "start" })}>{game.players.length < game.min_players ? `AI ${game.min_players}명 채우기` : unreadyPlayers.length ? "준비 대기" : "게임 시작"}</button>}
         {game.phase === "lobby" && game.host !== game.me.id && <button className={me?.ready ? "" : "primary"} onClick={() => send({ t: "ready" })}>{me?.ready ? "준비 취소" : "준비하기"}</button>}
-        {game.phase === "night" && game.me.alive && ["mafia", "doctor", "detective", "bodyguard"].includes(role) && <button className="primary" onClick={() => selected ? commitDecision("action") : setMobileTab("suspects")}>{selected ? "명령 봉인" : "대상 선택"}</button>}
+        {game.phase === "night" && game.me.alive && ["mafia", "doctor", "detective", "bodyguard"].includes(role) && <button className="primary" onClick={() => selected ? commitDecision("action") : focusTargets()}>{selected ? "명령 봉인" : "대상 선택"}</button>}
         {game.phase === "dawn" && <button className="primary" onClick={() => { setInvestigationTool("timeline"); setMobileTab("suspects"); }}>타임라인 복원</button>}
-        {game.phase === "vote" && game.me.alive && <div><button aria-pressed={game.me.vote_target === "skip"} onClick={commitSkip}>기권</button><button className="danger" onClick={() => selected ? commitDecision("vote") : setMobileTab("suspects")}>{selected ? "표 봉인" : "용의자 선택"}</button></div>}
+        {game.phase === "vote" && game.me.alive && <div><button aria-pressed={game.me.vote_target === "skip"} onClick={commitSkip}>기권</button><button className="danger" onClick={() => selected ? commitDecision("vote") : focusTargets()}>{selected ? "표 봉인" : "용의자 선택"}</button></div>}
         {game.phase === "day" && <button onClick={() => setMobileTab("talk")}>{!game.me.alive || role === "spectator" ? "대화 관전" : isCurrentSpeaker ? "내 진술 열기" : "토론 참여"}</button>}
         {game.phase === "defense" && <button onClick={() => setMobileTab("talk")}>{isAccused ? "최후 변론" : "변론 듣기"}</button>}
         {game.phase === "verdict" && game.me.alive && !isAccused && <div><button onClick={() => commitJudgement(false)}>석방</button><button className="danger" onClick={() => commitJudgement(true)}>처형</button></div>}
