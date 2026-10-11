@@ -607,6 +607,7 @@ class Room:
             existing.nick = nick
             if coders_id is not None:
                 existing.coders_id = coders_id
+            self._ensure_host(existing)
             # A resumed seat has a new socket and must receive a fresh snapshot
             # even if the game state did not change while it reconnected.
             self._last_broadcast_payloads.pop(existing.id, None)
@@ -622,8 +623,7 @@ class Room:
                 socket_owner=ws,
             )
             self.players[player.id] = player
-            if self.host_id is None:
-                self.host_id = player.id
+            self._ensure_host(player)
             self._record(f"{player.nick}님이 테이블에 앉았습니다.")
         else:
             player = Player(
@@ -641,6 +641,19 @@ class Room:
         if self._task is None or self._task.done():
             self._task = asyncio.get_running_loop().create_task(self._ticker())
         return player, False
+
+    def _ensure_host(self, preferred: Player | None = None) -> None:
+        def eligible(player: Player | None) -> bool:
+            return bool(
+                player and player.connected and not player.is_bot
+                and player.role != "spectator"
+            )
+
+        if eligible(self.players.get(self.host_id or "")):
+            return
+        self.host_id = preferred.id if eligible(preferred) else next(
+            (player.id for player in self.players.values() if eligible(player)), None,
+        )
 
     def _unique_nick(self, nick: str) -> str:
         existing = {p.nick for p in self.players.values()}
@@ -665,16 +678,10 @@ class Room:
             self.players.pop(pid, None)
             self._last_broadcast_payloads.pop(pid, None)
             self._record(f"{player.nick}님이 자리를 떠났습니다.")
-            if self.host_id == pid:
-                self.host_id = next((p.id for p in self.players.values() if not p.is_bot), None)
         else:
             player.connected = False
             player.ws = None
-            if self.host_id == pid:
-                self.host_id = next(
-                    (p.id for p in self.players.values() if p.connected and not p.is_bot),
-                    None,
-                )
+        self._ensure_host()
         return True
 
     def toggle_ready(self, pid: str) -> None:

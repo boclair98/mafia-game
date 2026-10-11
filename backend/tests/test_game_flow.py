@@ -98,6 +98,54 @@ async def test_failed_broadcast_preserves_latest_socket_cleanup_authority(resume
     assert participant.socket_owner is None
 
 
+@pytest.mark.parametrize("orphan_host", [None, "bot", "disconnected"])
+async def test_existing_gameover_seat_restores_orphan_host_and_can_rematch(orphan_host):
+    room = room_with("citizen", "mafia", "doctor", "citizen")
+    room.phase = "gameover"
+    for participant in room.players.values():
+        participant.connected = False
+    room.players["p2"].is_bot = orphan_host == "bot"
+    room.players["p2"].connected = orphan_host == "bot"
+    room.host_id = "p2" if orphan_host else None
+    resumed, restored = room.join(object(), "P1", None, room.players["p1"].key)
+    assert restored is True
+    assert room.host_id == resumed.id
+    assert room._state_for(resumed)["host"] == resumed.id
+    assert room.rematch(resumed.id) is None
+    assert room.phase == "lobby"
+
+
+async def test_resuming_previous_host_does_not_displace_current_connected_host():
+    room = room_with("citizen", "mafia", "doctor", "citizen")
+    room.phase = "gameover"
+    room.players["p1"].connected = False
+    room.host_id = "p2"
+    room.join(object(), "P1", None, room.players["p1"].key)
+    assert room.host_id == "p2"
+    assert room.rematch("p1") is not None
+    assert room.rematch("p2") is None
+
+
+async def test_resuming_spectator_never_becomes_orphan_room_host():
+    room = room_with("citizen", "spectator")
+    room.phase = "gameover"
+    room.players["p1"].connected = False
+    room.players["p2"].alive = False
+    room.host_id = None
+    room.join(object(), "P2", None, room.players["p2"].key)
+    assert room.host_id is None
+    assert room.rematch("p2") is not None
+
+
+def test_host_departure_does_not_promote_connected_spectator():
+    room = room_with("citizen", "spectator", "citizen")
+    room.phase = "gameover"
+    room.players["p2"].alive = False
+    room.players["p3"].connected = False
+    assert room.leave("p1") is True
+    assert room.host_id is None
+
+
 @pytest.mark.parametrize("role", ["citizen", "mafia", "spectator"])
 def test_dead_players_cannot_post_public_ballot_chat(role):
     room = room_with("mafia", "doctor", "detective", role)

@@ -308,6 +308,32 @@ def test_same_player_key_resumes_seat():
             assert resumed["nick"] == original["nick"]
 
 
+def test_gameover_reconnect_restores_host_and_accepts_rematch():
+    room_name = f"rematch-resume-{uuid4().hex[:8]}"
+    url = f"/api/ws?room={room_name}&key=rematch-resume-key"
+    with TestClient(app) as client:
+        with client.websocket_connect(url) as original:
+            original_id = original.receive_json()["id"]
+            original.receive_json()
+            arena = rooms.get(room_name)
+            assert arena.fill_bots(original_id, 4) is None
+            arena._set_phase("gameover", 0)
+        assert arena.host_id is None
+        with client.websocket_connect(url) as resumed:
+            assert resumed.receive_json()["id"] == original_id
+            state = resumed.receive_json()
+            assert state["host"] == original_id
+            assert state["phase"] == "gameover"
+            resumed.send_json({"t": "rematch"})
+            for _ in range(5):
+                state = resumed.receive_json()
+                if state["t"] == "state" and state["phase"] == "lobby":
+                    assert state["host"] == original_id
+                    break
+            else:
+                pytest.fail("resumed host could not start a rematch lobby")
+
+
 @pytest.mark.parametrize("phase", ["lobby", "day"])
 def test_overlapping_reconnect_closes_old_socket_and_keeps_new_seat(phase):
     room_name = f"overlap-{phase}-{uuid4().hex[:8]}"
