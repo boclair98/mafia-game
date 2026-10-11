@@ -1,0 +1,328 @@
+/* The live table has its own readable type scale and phase palette. */
+.game-shell {
+  --hud-accent: #d4b77c;
+  --hud-muted: #a3a9b3;
+  --hud-line: #303741;
+  padding-inline: clamp(12px, 2vw, 32px);
+  color: #e9e8e3;
+  background: #0b0e14;
+}
+.game-shell.phase-night { --hud-accent: #9db7f0; }
+.game-shell.phase-dawn, .game-shell.phase-day { --hud-accent: #dfc28a; }
+.game-shell.phase-vote, .game-shell.phase-defense, .game-shell.phase-verdict { --hud-accent: #ee8895; }
+.game-shell::before { background: radial-gradient(ellipse at 50% 0, #24304455, transparent 55%); }
+.game-shell.phase-night::before { background: radial-gradient(ellipse at 50% 0, #26396866, transparent 55%); }
+.game-shell.phase-day::before { background: radial-gradient(ellipse at 50% 0, #59462944, transparent 55%); }
+.game-shell :is(button, input, select, textarea, [tabindex="0"]):focus-visible { outline: 2px solid var(--hud-accent); outline-offset: 3px; }
+.game-shell :is(p, b, span) { word-break: keep-all; overflow-wrap: anywhere; }
+.game-shell :is(button, input, select) { min-height: 44px; }
+.game-shell button { border-radius: 8px; }
+.game-shell :is(input, select) { min-width: 0; color: #f1f0ed; }
+.game-shell input::placeholder { color: #969da9; }
+.game-shell :is(.panel-label, .phase-kicker) { color: #b5aca0; font-size: 11px; letter-spacing: .14em; }
+.game-shell .topbar { max-width: 1480px; margin-inline: auto; }
+.game-shell .guide-button { padding-inline: 12px; font-size: 12px; color: #c3c7ce; }
+.game-shell .room-pill { min-width: 0; }
+.game-shell .room-pill b { font-size: 13px; }
+.game-shell .connection { color: #a6bbac; font-size: 12px; }
+.game-shell .phase-banner {
+  max-width: 1480px;
+  height: 250px;
+  margin: 8px auto 0;
+  padding: 26px 24px 116px;
+  align-items: flex-start;
+  border-radius: 16px;
+  border-color: #3a404b;
+  background-position: center 42%;
+}
+.game-shell .phase-banner::before { background: linear-gradient(90deg, #050810ed, #080c1470 62%, #070b12a8), linear-gradient(0deg, #080d15fa, transparent 95%); }
+.game-shell .phase-banner h1 { margin: 9px 0; font-size: clamp(32px, 4vw, 44px); }
+.game-shell .phase-banner > p { max-width: calc(100% - 180px); justify-items: start; gap: 5px; }
+.game-shell .phase-banner > p b { font-size: 13px; color: #e0ccab; }
+.game-shell .phase-banner > p span { font-size: 13px; color: #c2c7d0; }
+.game-shell .threat-monitor { display: none; }
+.game-shell .timer {
+  top: 26px;
+  right: 24px;
+  min-width: 116px;
+  padding: 13px 16px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid #ffffff2e;
+  border-radius: 12px;
+  background: #090f19cc;
+  color: #f4eee2;
+  font-size: 32px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.game-shell .timer small { color: #b8bfcc; font: 12px/1.4 sans-serif; letter-spacing: 0; }
+.game-shell .timer.urgent { border-color: #ee889588; color: #ff9eaa; }
+.game-shell .case-command-center {
+  left: 24px;
+  bottom: 40px;
+  width: calc(100% - 48px);
+  grid-template-columns: 146px minmax(0, 1fr) 174px auto;
+  min-height: 76px;
+  transform: none;
+  border-radius: 10px;
+  border-color: #ffffff29;
+  box-shadow: inset 3px 0 var(--hud-accent);
+}
+.game-shell .case-command-center small { color: #a6a9b2; font-size: 10px; letter-spacing: .08em; }
+.game-shell :is(.command-now, .command-next) b { font-size: 13px; white-space: normal; }
+.game-shell .command-now em { color: var(--hud-accent); font-size: 14px; }
+.game-shell .command-objective b { color: #e4e5e8; font-size: 13px; white-space: normal; line-height: 1.55; }
+.game-shell .case-command-center > button { min-height: 44px; font-size: 13px; }
+.game-shell .phase-track { left: 24px; right: 24px; bottom: 12px; justify-content: space-between; transform: none; }
+.game-shell .phase-track > div { width: 12.5%; font-size: 11px; color: #949ca9; }
+.game-shell .phase-track .active { color: var(--hud-accent); }
+.game-shell .game-grid { max-width: 1480px; height: auto; min-height: 0; margin-top: 18px; grid-template-columns: 220px minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.game-shell :is(.role-panel, .table-panel, .story-card, .chat-card) { min-width: 0; border-radius: 14px; border-color: var(--hud-line); background-color: #111720; }
+.game-shell .table-panel { height: auto; overflow: visible; }
+.game-shell .panel-heading { padding: 17px; }
+.game-shell .panel-heading > div:last-child { color: #b7c9b5; font-size: 13px; }
+.game-shell .panel-heading h2 { font-size: 22px; }
+.game-shell .comms-panel { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.game-shell .role-panel > p { font-size: 14px; color: #b6beca; line-height: 1.7; }
+.game-shell .role-dossier b, .game-shell .secret-box span { font-size: 13px; color: #d8dde5; line-height: 1.6; }
+.game-shell .role-dossier :is(small, p), .game-shell .sealed-notice { font-size: 12px; color: #aab3c0; line-height: 1.6; }
+.game-shell .evidence-row { min-height: 48px; gap: 4px; }
+.game-shell .evidence-row > span { min-width: 0; font-size: 12px; }
+.game-shell .evidence-row button { min-width: 44px; font-size: 12px; }
+.game-shell .player-grid { padding: 14px; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: visible; }
+.game-shell .player-card { min-height: 194px; border-radius: 12px; border-color: #37414e; }
+.game-shell .player-card.selected { border-color: var(--hud-accent); box-shadow: 0 0 0 2px var(--hud-accent), 0 8px 24px #0005; }
+.game-shell .player-card.dead { opacity: .68; }
+.game-shell .portrait { min-height: 104px; }
+.game-shell .portrait > span { padding: 4px 7px; border-radius: 5px; font-size: 12px; color: #f1f1ed; }
+.game-shell .player-info { padding: 12px; }
+.game-shell .player-info > div { flex-wrap: wrap; gap: 5px; }
+.game-shell .player-info strong { max-width: 100%; flex-basis: 100%; font-size: 14px; line-height: 1.4; }
+.game-shell .player-info small { font-size: 11px; color: #e1e4e9; }
+.game-shell .player-info > span { display: inline-block; margin-top: 4px; font-size: 12px; color: #aeb7c4; }
+.game-shell :is(.suspicion-meter span, .pressure-count, .accused-mark, .vote-count) { font-size: 11px; }
+.game-shell .pressure-action { font-size: 12px; }
+.game-shell .target-lock { margin: 2px 14px 14px; border-radius: 10px; }
+.game-shell .target-lock b { font-size: 16px; }
+.game-shell .target-lock :is(small, em) { font-size: 12px; }
+.game-shell .target-lock button { min-width: 44px; }
+.game-shell .action-bar { min-width: 0; flex-wrap: wrap; position: static; border-radius: 0 0 14px 14px; padding: 16px; gap: 10px; }
+.game-shell .action-bar > div:first-child { flex-basis: 100%; }
+.game-shell .action-bar b { font-size: 14px; line-height: 1.5; }
+.game-shell .action-bar span { font-size: 12px; line-height: 1.6; color: #afb7c4; }
+.game-shell .action-bar button { font-size: 13px; }
+.game-shell .narrative-scene-card { border-radius: 10px; padding: 16px; }
+.game-shell .narrative-scene-top :is(span, small) { font-size: 11px; color: #bca98a; }
+.game-shell .narrative-scene-copy p { padding-right: 0; color: #bec4cf; font-size: 13px; line-height: 1.7; }
+.game-shell .narrative-scene-steps { position: static; margin-top: 12px; }
+.game-shell .narrative-rail :is(header span, header small, .narrative-rail-steps span) { font-size: 11px; color: #abaeb8; }
+.game-shell .narrative-rail header b { font-size: 14px; }
+.game-shell .narrative-motif { font-size: 14px; line-height: 1.7; }
+.game-shell .sealed-lead-card { border-radius: 10px; }
+.game-shell .sealed-lead-card b { font-size: 14px; }
+.game-shell .sealed-lead-card p { font-size: 13px; line-height: 1.6; color: #c0c4cd; }
+.game-shell .sealed-lead-card :is(small, button, em) { font-size: 11px; }
+.game-shell .sealed-lead-card { grid-template-columns: 36px minmax(0, 1fr); }
+.game-shell .sealed-lead-card > button, .game-shell .sealed-lead-card > em { grid-column: 1 / -1; justify-content: center; }
+.game-shell :is(.scene-reconstruction-card, .memory-seal-card, .evidence-chain-card, .oath-card, .contract-card) { border-radius: 10px; }
+.game-shell :is(.scene-reconstruction-card, .memory-seal-card, .evidence-chain-card, .oath-card, .contract-card) > p { font-size: 13px; line-height: 1.7; color: #b9c0cb; }
+.game-shell :is(.scene-reconstruction-card, .memory-seal-card, .evidence-chain-card, .oath-card, .contract-card) header b { font-size: 15px; }
+.game-shell :is(.scene-reconstruction-card, .memory-seal-card, .evidence-chain-card, .oath-card, .contract-card) :is(small, em) { font-size: 11px; }
+.game-shell :is(.scene-fragment-grid, .evidence-chain-board, .oath-feed, .contract-incoming) { font-size: 13px; }
+.game-shell .scene-fragment-grid button span { font-size: 12px; line-height: 1.6; }
+.game-shell :is(.evidence-chain-links b, .evidence-chain-row > p, .evidence-chain-note, .evidence-chain-locked, .evidence-chain-empty) { font-size: 12px; line-height: 1.6; }
+.game-shell .evidence-chain-links b { white-space: normal; }
+.game-shell .investigation-deck { border-radius: 12px; }
+.game-shell .investigation-deck-head :is(small, em) { font-size: 11px; }
+.game-shell .investigation-deck > nav button { min-width: 116px; font-size: 12px; }
+.game-shell .deduction-matrix :is(small, p), .game-shell .deduction-summary span, .game-shell .deduction-matrix > footer { font-size: 11px; }
+.game-shell .deduction-row { min-width: 730px; }
+.game-shell .deduction-row button { font-size: 11px; }
+.game-shell .deduction-suspect b { font-size: 13px; }
+.game-shell .story-card { min-height: 0; padding: 18px; }
+.game-shell :is(.story-list p, .ai-director p, .forensic-board p, .public-leads p, .director-beat-card p, .afterlife-panel > p) { font-size: 13px; color: #bcc4cf; line-height: 1.7; }
+.game-shell :is(.forensic-board b, .ai-director b, .public-leads b, .story-card-head button, .afterlife-panel b) { font-size: 13px; }
+.game-shell :is(.forensic-board small, .public-leads small, .story-list > div > span) { font-size: 11px; color: #a4adba; }
+.game-shell .chat-card { position: relative; min-height: 490px; overflow: hidden; }
+.game-shell .chat-title { min-height: 56px; gap: 8px; padding-inline: 16px; }
+.game-shell .chat-title b { font-size: 14px; }
+.game-shell .chat-title > span { font-size: 11px; color: #b7c8ab; white-space: nowrap; }
+.game-shell .voice-chat-bar { position: static; gap: 10px; flex-wrap: wrap; padding: 12px 16px; }
+.game-shell .voice-chat-bar b { font-size: 13px; }
+.game-shell .voice-chat-bar small { max-width: none; font-size: 11px; color: #aab4c4; }
+.game-shell .voice-chat-actions button { font-size: 12px; }
+.game-shell .chat-scroll { min-height: 210px; height: 320px; max-height: 55dvh; padding: 16px; overscroll-behavior: contain; overflow-anchor: none; }
+.game-shell .chat-message { margin-bottom: 18px; }
+.game-shell .chat-message header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.game-shell .chat-message b { min-width: 0; font-size: 12px; color: #b8c6da; }
+.game-shell .chat-message time { color: #8f9bae; font-size: 11px; font-variant-numeric: tabular-nums; }
+.game-shell .chat-message header > span { margin-left: auto; display: flex; gap: 3px; }
+.game-shell .chat-message header button { min-width: 44px; padding: 3px 5px; font-size: 11px; color: #a9b3c2; }
+.game-shell .chat-message p { margin-top: 6px; padding: 10px 12px; border-radius: 0 10px 10px; background: #1d2633; color: #e0e4ea; font-size: 14px; line-height: 1.7; }
+.game-shell .chat-message.mine p { border: 1px solid #bda37038; background: #292820; }
+.game-shell .chat-message.mine b { color: #e1c993; }
+.game-shell .empty-chat { margin: 30px auto; display: grid; place-items: center; gap: 10px; color: #a3b0c2; font-size: 13px; }
+.game-shell .empty-chat b { color: #d3dbe7; font-size: 15px; }
+.game-shell .chat-latest { margin: 0 16px 10px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid #9a8057; color: #f0d8aa; background: #2c261b; font-size: 12px; }
+.game-shell .chat-form { padding: 12px; gap: 8px; position: static; }
+.game-shell .chat-form input { width: 0; flex: 1; min-height: 48px; border: 1px solid #364354; border-radius: 8px; background: #0c121c; font-size: 16px; }
+.game-shell .chat-form button { min-width: 48px; background: #d4b77c; color: #171a1e; }
+.game-shell .chat-form button:disabled { background: #28303b; color: #778294; }
+.game-shell .reaction-dock { gap: 6px; padding-inline: 12px; }
+.game-shell .reaction-dock button { flex: 1; min-width: 0; min-height: 44px; }
+.game-shell .trial-copy p, .game-shell .interrogation-response p { font-size: 13px; line-height: 1.6; }
+.game-shell .interrogation-heading b { font-size: 15px; }
+.game-shell .interrogation-heading :is(span, em) { font-size: 11px; }
+.game-shell .interrogation-stage { border-radius: 10px; }
+.game-shell .interrogation-response { flex-wrap: wrap; }
+.game-shell .interrogation-response form { min-width: 0; flex-basis: 100%; }
+.game-shell .interrogation-response form button { min-width: 44px; }
+.game-shell .interrogation-response > div { flex-wrap: wrap; }
+.game-shell .interrogation-response > div > span { font-size: 11px; color: #a6aebb; }
+.game-shell .interrogation-response > div button, .game-shell .claim-form button { font-size: 12px; padding-inline: 12px; }
+.game-shell .speaker-order span { font-size: 11px; padding: 6px 8px; }
+.game-shell .question-feed { min-height: 65px; max-height: 130px; }
+.game-shell .question-feed > p { font-size: 12px; color: #b1bdcc; line-height: 1.6; }
+.game-shell .interrogation-observer { font-size: 12px; line-height: 1.6; color: #aab6c7; }
+.game-shell :is(.ballot-call, .read-summary-panel, .replay-panel) { border-radius: 10px; }
+.game-shell :is(.ballot-call, .read-summary-panel, .replay-panel) header b { font-size: 14px; }
+.game-shell :is(.ballot-call, .read-summary-panel, .replay-panel) header small { font-size: 11px; color: #a1acbc; }
+.game-shell .ballot-call article { min-width: 168px; }
+.game-shell .ballot-call article :is(em, b, span) { font-size: 12px; }
+.game-shell .ballot-call > div > p { font-size: 12px; color: #a1acbc; line-height: 1.6; }
+.game-shell .read-summary-panel > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.game-shell .read-summary-panel article :is(b, span) { font-size: 11px; }
+.game-shell .replay-panel article p { font-size: 13px; line-height: 1.6; color: #c3c9d3; }
+.game-shell .replay-panel article small { font-size: 11px; color: #a1acbc; }
+.game-shell .afterlife-panel :is(small, footer) { font-size: 12px; }
+.game-shell .afterlife-panel > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.game-shell .afterlife-panel > div button b { font-size: 12px; }
+.game-shell .phase-alert-card { border-radius: 18px; max-height: calc(100dvh - 32px); overflow-y: auto; }
+.game-shell .phase-alert p { font-size: 14px; line-height: 1.7; }
+.game-shell .phase-alert-scene p { font-size: 12px; }
+.game-shell .phase-alert-continue { min-height: 46px; padding: 0 20px; margin: 16px auto 0; display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid #897852; background: #cbb17d; color: #12161d; font-size: 14px; font-weight: 700; }
+.game-shell .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+@media (min-width: 1600px) {
+  .game-shell .game-grid { grid-template-columns: 240px minmax(0, 1fr) 360px; }
+  .game-shell .player-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 1199px) {
+  .game-shell { padding-bottom: calc(172px + env(safe-area-inset-bottom)); }
+  .game-shell .game-grid { display: block; }
+  .game-shell .comms-panel { display: none; }
+  .game-shell.mobile-view-case .comms-panel, .game-shell.mobile-view-talk .comms-panel { display: flex; }
+  .game-shell .phase-banner { height: 235px; padding-bottom: 52px; }
+  .game-shell .case-command-center { display: none; }
+  .game-shell .phase-banner .phase-now { display: flex; min-height: 32px; margin-top: 12px; }
+  .game-shell .phase-now b, .game-shell .phase-now span { font-size: 12px; }
+  .game-shell .player-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .game-shell .role-panel { max-width: 700px; }
+  .game-shell .chat-card { min-height: 420px; }
+  .game-shell .chat-scroll { min-height: 240px; height: 45dvh; max-height: 580px; }
+  .game-shell .mobile-command-dock { min-height: 84px; padding: 12px; border-radius: 12px 12px 0 0; }
+  .game-shell .mobile-command-dock small { font-size: 11px; }
+  .game-shell .mobile-command-dock b { max-height: none; overflow: visible; font-size: 12px; line-height: 1.55; }
+  .game-shell .mobile-command-dock button { font-size: 13px; }
+  .game-shell .mobile-game-nav button { min-height: 52px; font-size: 12px; }
+  .game-shell .phase-night .action-bar, .game-shell .phase-day .action-bar { position: static; }
+}
+@media (max-width: 760px) {
+  .game-shell { padding-inline: 10px; padding-bottom: calc(208px + env(safe-area-inset-bottom)); }
+  .game-shell .topbar { padding-inline: 4px; }
+  .game-shell .mini-brand { gap: 4px; }
+  .game-shell .guide-button { width: 44px; min-height: 44px; padding: 0; }
+  .game-shell .room-pill { max-width: 55vw; }
+  .game-shell .room-pill b { max-width: 26vw; font-size: 11px; }
+  .game-shell .room-pill button { min-width: 40px; }
+  .game-shell .phase-banner { height: auto; min-height: 220px; padding: 22px 16px 52px; border-radius: 12px; }
+  .game-shell .phase-kicker { max-width: calc(100% - 100px); font-size: 11px; letter-spacing: .04em; }
+  .game-shell .phase-banner h1 { max-width: calc(100% - 80px); font-size: 29px; line-height: 1.15; }
+  .game-shell .phase-banner > p { max-width: 100%; padding-top: 5px; }
+  .game-shell .phase-banner > p b { font-size: 12px; }
+  .game-shell .phase-banner > p span { max-height: none; font-size: 12px; line-height: 1.6; overflow: visible; }
+  .game-shell .timer { top: 20px; right: 12px; min-width: 76px; padding: 10px; gap: 5px; font-size: 22px; }
+  .game-shell .timer small { font-size: 11px; }
+  .game-shell .phase-banner .phase-now { display: none; }
+  .game-shell .phase-track { left: 14px; right: 14px; bottom: 13px; }
+  .game-shell .phase-track > div { width: auto; flex: 1; font-size: 0; }
+  .game-shell .phase-track > div.active { flex: 2; }
+  .game-shell .phase-track > div.active span { color: #eee3d0; font-size: 11px; }
+  .game-shell .game-grid { margin-top: 12px; min-height: 0; }
+  .game-shell .player-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px; gap: 10px; }
+  .game-shell .player-card { min-height: 204px; }
+  .game-shell .portrait { min-height: 112px; }
+  .game-shell .player-info { padding: 11px; }
+  .game-shell .player-info strong { font-size: 14px; }
+  .game-shell .player-info > span { font-size: 12px; }
+  .game-shell .mobile-command-dock { width: calc(100% - 12px); gap: 8px; min-height: 90px; align-items: center; }
+  .game-shell .mobile-command-dock > button { min-width: 86px; font-size: 12px; padding-inline: 10px; }
+  .game-shell .mobile-command-dock > div { flex-direction: column; }
+  .game-shell .mobile-command-dock > div button { min-width: 68px; padding-inline: 10px; }
+  .game-shell .mobile-command-dock > span b { max-height: none; font-size: 12px; }
+  .game-shell .mobile-game-nav { height: calc(66px + env(safe-area-inset-bottom)); }
+  .game-shell .mobile-game-nav button { font-size: 11px; }
+  .game-shell .chat-scroll { height: 42dvh; min-height: 250px; max-height: 540px; padding: 14px; }
+  .game-shell .chat-message header { gap: 4px; }
+  .game-shell .chat-message p { font-size: 15px; }
+  .game-shell .chat-title { padding-inline: 14px; }
+  .game-shell .chat-title b { font-size: 13px; }
+  .game-shell .voice-chat-actions { margin-left: auto; }
+  .game-shell .voice-chat-bar small { max-width: 100%; }
+  .game-shell .deduction-table { max-height: 390px; }
+  .game-shell .scene-fragment-grid { grid-template-columns: 1fr; }
+  .game-shell .read-summary-panel > div, .game-shell .replay-panel > div { grid-template-columns: 1fr; }
+  .game-shell .investigation-deck > nav button { flex-basis: 124px; }
+  .game-shell .phase-alert-card { width: calc(100vw - 28px); padding: 30px 20px; }
+  .game-shell .phase-alert h2 { font-size: 30px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .game-shell .city-atmosphere, .game-shell .grain { display: none; }
+}
+
+.game-shell .phase-alert, .game-shell .phase-alert-card, .game-shell .phase-alert-card::after, .game-shell .phase-alert-line i { animation-duration:1.8s; }
+@media(max-width:760px) {
+  .game-shell .mini-brand .passport-guide-button { font-size:0; width:44px; height:44px; padding:0; flex:0 0 44px; }
+  .game-shell .mini-brand .passport-guide-button svg { width:18px; height:18px; }
+  .game-shell .mini-brand { min-width:0; gap:8px; }
+}
+
+@media(min-width:1200px) {
+  .game-shell .comms-panel .chat-card { order:-1; }
+  .game-shell .table-panel { display:flex; flex-direction:column; }
+  .game-shell .table-panel > .panel-heading { order:-3; }
+  .game-shell .table-panel > .target-lock { order:-2; }
+  .game-shell .table-panel > .action-bar { order:-1; border-bottom:1px solid var(--hud-line); border-radius:0; }
+  .game-shell .chat-scroll { height:300px; max-height:calc(100dvh - 500px); }
+}
+
+@media(min-width:1200px) {
+  .game-shell { padding-bottom:120px; }
+  .game-shell .mobile-command-dock {
+    display:flex; position:fixed; bottom:20px;
+    left:calc(max(32px, (100vw - 1480px)/2) + 236px);
+    right:calc(max(32px, (100vw - 1480px)/2) + 356px);
+    width:auto; z-index:50; min-height:80px; gap:16px; padding:14px 18px;
+    border:1px solid #746246; border-radius:12px; background:#121923f5;
+    box-shadow:0 12px 40px #0009;
+  }
+  .game-shell .mobile-command-dock > span { flex:1; min-width:0; display:grid; gap:7px; }
+  .game-shell .mobile-command-dock small { color:#d4b77c; font-size:11px; }
+  .game-shell .mobile-command-dock b { font-size:13px; line-height:1.6; }
+  .game-shell .mobile-command-dock button { flex:none; min-height:44px; min-width:90px; padding:10px 16px; border-radius:8px; font-size:13px; }
+  .game-shell .mobile-command-dock > div { display:flex; gap:8px; }
+}
+
+@media(max-width:1199px) { .game-shell .mobile-command-dock.command-gameover { display:flex; } }
+
+.case-modal { color:#ece7de; }
+.case-modal p { font-size:14px; line-height:1.8; color:#c3c5c9; word-break:keep-all; overflow-wrap:anywhere; }
+.case-modal :is(small, em, .case-log-title span, .case-log-title b) { font-size:11px; line-height:1.6; }
+.case-modal .case-suspect b, .case-modal .case-clue-grid b { font-size:15px; }
+.case-modal .case-log-scroll > div { min-height:52px; padding:10px 0; }
+.case-modal .case-log-scroll > div > span { font-size:11px; }
+.case-modal button { min-height:44px; min-width:44px; font-size:13px; }
+.tutorial-copy > p { font-size:16px; line-height:1.8; color:#c9c5bb; word-break:keep-all; }
+.tutorial-film button { min-height:44px; min-width:44px; }
+.tutorial-copy > small { font-size:11px; }

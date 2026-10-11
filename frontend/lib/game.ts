@@ -65,6 +65,8 @@ export type SecretContract = { id: string; owner_id: string; owner: string; targ
 
 export type GameState = {
   t: "state";
+  phase_id: string;
+  server_now: number;
   room: string;
   case_profile: CaseProfile;
   round_event: RoundEvent | null;
@@ -91,6 +93,7 @@ export type GameState = {
   min_players: number;
   max_players: number;
   players: PlayerState[];
+  voice_scope: string | null;
   me: {
     id: string;
     role: Role;
@@ -138,6 +141,7 @@ export type GameState = {
   ballot_feed: BallotEntry[];
   guide: string;
   chat: ChatMessage[];
+  ghost_chat?: ChatMessage[];
   reactions: ReactionState[];
   speaker_id: string | null;
   speaker_deadline: number;

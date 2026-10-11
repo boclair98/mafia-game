@@ -25,6 +25,13 @@ from app.routes.leaderboard import persist_best_score
 router = APIRouter()
 
 
+async def _reject_socket(ws: WebSocket, code: int, reason: str) -> None:
+    # Closing before accepting becomes HTTP 403: browsers receive only 1006
+    # and cannot distinguish a missing/full room from a transport failure.
+    await ws.accept()
+    await ws.close(code=code, reason=reason)
+
+
 def _socket_identity(ws: WebSocket) -> tuple[UUID | None, str | None]:
     raw = ws.headers.get("x-coders-user") or settings.dev_fake_user
     try:
@@ -42,6 +49,7 @@ async def game_socket(
     room: str = Query(default="lobby"),
     nick: str | None = Query(default=None),
     key: str | None = Query(default=None),
+    join_only: bool = Query(default=False),
 ) -> None:
     coders_id, platform_name = _socket_identity(ws)
     fallback = platform_name or f"익명-{secrets.token_hex(2)}"
@@ -49,9 +57,12 @@ async def game_socket(
     player_key = clean_player_key(key)
     room_name = clean_room_name(room)
     try:
-        arena = rooms.get(room_name)
+        arena = rooms.find(room_name) if join_only else rooms.get(room_name)
     except RoomCapacityError:
-        await ws.close(code=4006, reason="server_busy")
+        await _reject_socket(ws, 4006, "server_busy")
+        return
+    if arena is None:
+        await _reject_socket(ws, 4007, "room_not_found")
         return
 
     # A reconnect/resume replaces an existing seat and therefore does not
@@ -61,29 +72,62 @@ async def game_socket(
     known_seat = any(p.key == player_key for p in arena.players.values())
     if not known_seat and rooms.online >= settings.max_connections:
         rooms.sweep(room_name)
-        await ws.close(code=4006, reason="server_busy")
+        await _reject_socket(ws, 4006, "server_busy")
         return
 
     if arena.phase == "lobby" and len(arena.players) >= MAX_PLAYERS and not any(
         p.key == player_key for p in arena.players.values()
     ):
-        await ws.close(code=4004, reason="room_full")
+        await _reject_socket(ws, 4004, "room_full")
         return
     if arena.phase == "lobby" and arena.lobby_mode in {"solo", "first"} and arena.connected_players and not any(
         p.key == player_key for p in arena.players.values()
     ):
-        await ws.close(code=4005, reason="solo_room")
+        await _reject_socket(ws, 4005, "solo_room")
         return
 
     await ws.accept()
+    # The handshake yields. Other sockets can consume the last seat or the
+    # original room can be swept while it is in flight. Resolve the current
+    # room and repeat admission checks immediately before the synchronous join.
+    try:
+        arena = rooms.find(room_name) if join_only else rooms.get(room_name)
+    except RoomCapacityError:
+        await ws.close(code=4006, reason="server_busy")
+        return
+    if arena is None:
+        await ws.close(code=4007, reason="room_not_found")
+        return
+    known_seat = any(p.key == player_key for p in arena.players.values())
+    if not known_seat and rooms.online >= settings.max_connections:
+        rooms.sweep(room_name)
+        await ws.close(code=4006, reason="server_busy")
+        return
+    if not known_seat and arena.phase == "lobby":
+        if len(arena.players) >= MAX_PLAYERS:
+            await ws.close(code=4004, reason="room_full")
+            return
+        if arena.lobby_mode in {"solo", "first"} and arena.connected_players:
+            await ws.close(code=4005, reason="solo_room")
+            return
+    previous_socket = next(
+        (p.ws for p in arena.players.values() if p.key == player_key), None
+    )
     player, resumed = arena.join(ws, chosen_nick, coders_id, player_key)
-    await ws.send_text(welcome_message(arena, player, resumed))
-    await arena.broadcast()
 
     try:
+        if previous_socket is not None and previous_socket is not ws:
+            try:
+                await previous_socket.close(code=4001, reason="session_replaced")
+            except (RuntimeError, WebSocketDisconnect):
+                pass
+        await ws.send_text(welcome_message(arena, player, resumed))
+        await arena.broadcast()
         while True:
             try:
                 raw_message = await ws.receive_text()
+                if player.ws is not ws or not player.connected:
+                    break
                 if len(raw_message) > 8192:
                     continue
                 msg = json.loads(raw_message)
@@ -97,6 +141,15 @@ async def game_socket(
                 continue
             if command not in {"ping", "voice_signal"}:
                 player.last_command_at = now
+            if command in {"action", "vote", "judge"} and msg.get("phase_id") != arena.phase_id:
+                await ws.send_text(json.dumps({
+                    "t": "error", "code": "stale_phase",
+                    "message": "진행 단계가 바뀌었습니다. 최신 화면에서 다시 선택하세요. 계속되면 새로고침해 주세요.",
+                }, ensure_ascii=False))
+                await ws.send_text(json.dumps(
+                    arena._state_for(player), ensure_ascii=False, separators=(",", ":"),
+                ))
+                continue
             arena.touch()
             error: str | None = None
             match command:
@@ -133,6 +186,8 @@ async def game_socket(
                     error = arena.add_reaction(player.id, str(msg.get("emoji", "")))
                 case "chat":
                     error = arena.add_chat(player.id, str(msg.get("text", "")))
+                case "ghost_chat":
+                    error = arena.add_ghost_chat(player.id, str(msg.get("text", "")))
                 case "reveal_lead":
                     error = arena.reveal_private_lead(
                         player.id, str(msg.get("lead_id", ""))
@@ -212,6 +267,7 @@ async def game_socket(
                         player.id,
                         str(msg.get("target", "")),
                         msg.get("data"),
+                        msg.get("scope"),
                     )
                     if error:
                         await ws.send_text(json.dumps(
@@ -229,8 +285,8 @@ async def game_socket(
     except WebSocketDisconnect:
         pass
     finally:
-        arena.leave(player.id)
+        released = arena.leave(player.id, ws)
         rooms.sweep(arena.name)
         await arena.broadcast()
-        if coders_id is not None and player.score > 0:
+        if released and coders_id is not None and player.score > 0:
             await persist_best_score(coders_id, platform_name, player.score)

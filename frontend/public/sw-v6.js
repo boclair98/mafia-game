@@ -1,4 +1,4 @@
-const CACHE = "black-midnight-v7";
+const CACHE = "black-midnight-v8";
 const SHELL = [
   "/manifest.webmanifest",
   "/icon.svg",
@@ -15,7 +15,7 @@ const SHELL = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL.filter((path) => !path.endsWith(".webp")))));
   self.skipWaiting();
 });
 

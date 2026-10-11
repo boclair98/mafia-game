@@ -26,8 +26,8 @@ const BACKOFF_CAP_MS = 8_000;
 // forever when a proxy or websocket upgrade is genuinely unavailable.
 const CONNECT_TIMEOUT_MS = 45_000;
 
-export function gameSocketUrl(room: string, nick: string, key: string): string {
-  const query = `room=${encodeURIComponent(room)}&nick=${encodeURIComponent(nick)}&key=${encodeURIComponent(key)}`;
+export function gameSocketUrl(room: string, nick: string, key: string, joinOnly = false): string {
+  const query = `room=${encodeURIComponent(room)}&nick=${encodeURIComponent(nick)}&key=${encodeURIComponent(key)}${joinOnly ? "&join_only=true" : ""}`;
   // `next dev` can't proxy WebSockets (PLATFORM.md), so in local dev we
   // hit the backend's published port directly. In production nginx
   // proxies /api/ws on this same origin with Upgrade headers.
@@ -44,7 +44,7 @@ export function gameSocketUrl(room: string, nick: string, key: string): string {
 type Handlers = {
   onMessage: (msg: unknown) => void;
   onStatus: (status: ConnStatus) => void;
-  onFatal?: (reason: "room_full" | "solo_room" | "removed_by_host" | "server_busy") => void;
+  onFatal?: (reason: "room_full" | "solo_room" | "removed_by_host" | "server_busy" | "room_not_found" | "session_replaced") => void;
 };
 
 export class GameSocket {
@@ -103,6 +103,7 @@ export class GameSocket {
     };
 
     ws.onmessage = (ev) => {
+      if (this.closed || this.ws !== ws) return;
       try {
         this.handlers.onMessage(JSON.parse(ev.data));
       } catch {
@@ -117,11 +118,15 @@ export class GameSocket {
       if (this.pingTimer) clearInterval(this.pingTimer);
       this.pingTimer = null;
       if (this.closed) return;
-      if (event.code === 4003 || event.code === 4004 || event.code === 4005 || event.code === 4006) {
+      if (event.code === 4001 || event.code === 4007 || event.code === 4003 || event.code === 4004 || event.code === 4005 || event.code === 4006) {
         this.closed = true;
         this.handlers.onStatus("failed");
         this.handlers.onFatal?.(
-          event.code === 4004
+          event.code === 4001
+            ? "session_replaced"
+            : event.code === 4007
+              ? "room_not_found"
+              : event.code === 4004
             ? "room_full"
             : event.code === 4005
               ? "solo_room"

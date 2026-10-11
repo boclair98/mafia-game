@@ -27,6 +27,7 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - run: node --test tests/voice-scope.test.mjs
       - run: pnpm build
 
   backend:

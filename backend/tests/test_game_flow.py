@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 
+import pytest
 from app.game import (
     CASE_TIMELINE,
     CASE_TIMELINE_LAYOUTS,
@@ -34,6 +35,89 @@ def room_with(*roles: str) -> Room:
         room.players[participant.id] = participant
     room.host_id = "p1"
     return room
+
+
+@pytest.mark.parametrize("phase,method,args,storage", [
+    ("night", "act", ("p1", "p4"), "actions"),
+    ("vote", "vote", ("p1", "p4"), "votes"),
+    ("verdict", "judge", ("p1", True), "judgements"),
+])
+def test_decisions_close_at_deadline_before_ticker_runs(monkeypatch, phase, method, args, storage):
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.phase = phase
+    room.deadline = 100.0
+    room.accused_id = "p4"
+    monkeypatch.setattr("app.game.time.time", lambda: 99.999)
+    assert getattr(room, method)(*args) is None
+    original = dict(getattr(room, storage))
+    monkeypatch.setattr("app.game.time.time", lambda: 100.0)
+    changed_args = ("p1", False) if method == "judge" else ("p1", "p2")
+    assert getattr(room, method)(*changed_args) is not None
+    assert getattr(room, storage) == original
+
+
+@pytest.mark.parametrize("phase", ["lobby", "night"])
+async def test_stale_socket_departure_preserves_resumed_seat(phase):
+    room = room_with("citizen", "citizen", "citizen", "citizen")
+    old_socket, new_socket = object(), object()
+    room.players["p1"].ws = old_socket
+    room.phase = phase
+    resumed, was_resumed = room.join(new_socket, "P1", None, room.players["p1"].key)
+    assert was_resumed is True
+    assert room.leave("p1", old_socket) is False
+    assert room.players["p1"] is resumed
+    assert resumed.connected is True
+    assert resumed.ws is new_socket
+    assert room.host_id == "p1"
+    assert room.leave("p1", new_socket) is True
+
+
+@pytest.mark.parametrize("resumed", [False, True])
+async def test_failed_broadcast_preserves_latest_socket_cleanup_authority(resumed):
+    class FailedSocket:
+        async def send_text(self, payload):
+            raise RuntimeError("connection closed")
+
+    manager = RoomManager()
+    room = manager.get("cleanup-regression")
+    original = FailedSocket()
+    current = FailedSocket() if resumed else original
+    participant, _ = room.join(original, "확인", None, "cleanup-test-key")
+    if resumed:
+        room.join(current, "확인", None, participant.key)
+    await room.broadcast()
+    assert participant.ws is None
+    assert participant.connected is False
+    assert participant.socket_owner is current
+    if resumed:
+        assert room.leave(participant.id, original) is False
+        assert participant.id in room.players
+    assert room.leave(participant.id, current) is True
+    manager.sweep(room.name)
+    assert manager.find(room.name) is None
+    assert participant.socket_owner is None
+
+
+@pytest.mark.parametrize("role", ["citizen", "mafia", "spectator"])
+def test_dead_players_cannot_post_public_ballot_chat(role):
+    room = room_with("mafia", "doctor", "detective", role)
+    room.phase = "vote"
+    room.players["p4"].alive = False
+    assert room.add_chat("p4", "생존자에게 전달할 비밀") is not None
+    assert list(room.chat) == []
+    assert room.add_chat("p2", "투표 근거를 확인합니다") is None
+    assert room._state_for(room.players["p1"])["chat"][-1]["from_id"] == "p2"
+
+
+def test_doctor_resolves_before_mafia_kill():
+    room = room_with("mafia", "doctor", "detective", "citizen", "citizen")
+    room.phase = "night"
+    assert room.act("p1", "p4") is None
+    assert room.act("p2", "p4") is None
+    room._resolve_night()
+    assert room.players["p4"].alive is True
+    assert room.last_death_id is None
+    assert room.phase == "dawn"
 
 
 def test_case_timeline_layouts_keep_the_same_anchors_but_change_causality():
@@ -73,6 +157,94 @@ def test_unique_vote_opens_defense_without_immediate_execution():
     assert room.accused_id == "p5"
     assert room.players["p5"].alive is True
     assert "최후 변론" in room.case_log[-1]
+
+
+def test_skip_is_a_sealed_completed_ballot_and_not_a_candidate():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.phase = "vote"
+    assert room.vote("p1", "skip") is None
+    assert room.vote("p2", "skip") is None
+    assert room.vote("p3", "skip") is None
+    assert room.vote("p4", "p1") is None
+    state = room._state_for(room.players["p1"])
+    assert state["me"]["vote_target"] == "skip"
+    assert state["decision_progress"] == {"completed": 4, "total": 4}
+    assert state["ballot_feed"] == []
+    assert state["skip_votes"] == 0
+    room._resolve_vote()
+    assert room.phase == "defense"
+    assert room.accused_id == "p1"
+    revealed = room._state_for(room.players["p2"])
+    assert revealed["skip_votes"] == 3
+    assert revealed["ballot_feed"][0]["target"] == "기권"
+    assert revealed["ballot_feed"][0]["target_id"] == "skip"
+    assert "기권 3표" in room.case_log[-1]
+
+
+@pytest.mark.parametrize("ballots", [
+    {"p1": "skip", "p2": "skip", "p3": "skip", "p4": "skip"},
+    {"p1": "p2", "p2": "p1", "p3": "skip", "p4": "skip"},
+])
+def test_all_skip_and_tied_target_ballots_have_no_accused(ballots):
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.phase = "vote"
+    room.votes = ballots
+    room._resolve_vote()
+    assert room.phase == "result"
+    assert room.accused_id is None
+    assert all(participant.alive for participant in room.players.values())
+
+
+def test_skip_keeps_voter_authority_and_deadline_rules():
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.phase = "vote"
+    room.players["p2"].alive = False
+    assert room.vote("p2", "skip") is not None
+    room.deadline = time.time() - 1
+    assert room.vote("p1", "skip") is not None
+    assert room.votes == {}
+
+
+@pytest.mark.parametrize("phase", ["night", "day", "vote", "gameover"])
+def test_ghost_chat_never_reaches_alive_players_even_at_game_over(phase):
+    room = room_with("mafia", "doctor", "mafia", "citizen", "spectator")
+    room.phase = phase
+    room.players["p3"].alive = False
+    room.players["p4"].alive = False
+    room.players["p5"].alive = False
+    assert room.add_ghost_chat("p1", "살아있는 마피아") is not None
+    assert room.add_ghost_chat("p2", "살아있는 시민") is not None
+    assert room.add_ghost_chat("p3", "사망한 마피아") is None
+    assert room.add_ghost_chat("p4", "사망한 시민") is None
+    assert room.add_ghost_chat("p5", "관전자") is None
+    assert list(room.chat) == []
+    for pid in ("p1", "p2"):
+        assert room._state_for(room.players[pid])["ghost_chat"] == []
+    for pid in ("p3", "p4", "p5"):
+        assert len(room._state_for(room.players[pid])["ghost_chat"]) == 3
+
+
+def test_ghost_chat_throttle_size_bound_and_rematch_clear(monkeypatch):
+    room = room_with("mafia", "doctor", "detective", "citizen")
+    room.phase = "day"
+    ghost = room.players["p4"]
+    ghost.alive = False
+    monkeypatch.setattr("app.game.time.time", lambda: 100.0)
+    assert room.add_ghost_chat("p4", "  기록  " + "가" * 200) is None
+    assert len(room.ghost_chat[-1]["text"]) == 160
+    monkeypatch.setattr("app.game.time.time", lambda: 100.449)
+    assert room.add_ghost_chat("p4", "너무 빠름") is not None
+    monkeypatch.setattr("app.game.time.time", lambda: 100.45)
+    assert room.add_ghost_chat("p4", "정상 간격") is None
+    for index in range(81):
+        ghost.last_chat_at = 0
+        assert room.add_ghost_chat("p4", f"기록 {index}") is None
+    assert len(room.ghost_chat) == 80
+    assert room.ghost_chat[-1]["text"] == "기록 80"
+    room.phase = "gameover"
+    assert room.rematch("p1") is None
+    assert list(room.ghost_chat) == []
+    assert room.add_ghost_chat("p4", "이전 게임 유령") is not None
 
 
 def test_tied_vote_skips_trial_and_keeps_everyone_alive():
@@ -272,9 +444,72 @@ def test_voice_presence_and_signaling_stay_inside_the_room():
     assert room._state_for(room.players["p1"])["players"][0]["voice"] is True
 
     signal = {"kind": "candidate", "candidate": {"candidate": "test"}}
-    assert asyncio.run(room.relay_voice("p1", "p2", signal)) is None
+    scope = room._state_for(room.players["p1"])["voice_scope"]
+    assert asyncio.run(room.relay_voice("p1", "p2", signal, scope)) is None
     payload = json.loads(socket.messages[-1])
-    assert payload == {"t": "voice_signal", "from": "p1", "data": signal}
+    assert payload == {"t": "voice_signal", "from": "p1", "data": signal, "scope": scope}
+
+
+@pytest.mark.parametrize("kind", ["offer", "answer", "candidate"])
+@pytest.mark.parametrize("phase,sender_id,target_id,allowed", [
+    ("day", "p1", "p2", True),
+    ("day", "p1", "p4", False),
+    ("night", "p1", "p5", True),
+    ("night", "p1", "p2", False),
+    ("night", "p4", "p5", False),
+    ("night", "p4", "p6", True),
+    ("verdict", "p1", "p5", False),
+])
+async def test_voice_signals_and_presence_are_filtered_by_channel(kind, phase, sender_id, target_id, allowed):
+    class FakeSocket:
+        def __init__(self):
+            self.messages = []
+
+        async def send_text(self, payload):
+            self.messages.append(json.loads(payload))
+
+    room = room_with("mafia", "doctor", "detective", "mafia", "mafia", "spectator")
+    room.players["p4"].alive = False
+    room.players["p6"].alive = False
+    for participant in room.players.values():
+        participant.ws = FakeSocket()
+        participant.voice = True
+    room._set_phase(phase, 30)
+    state = room._state_for(room.players[sender_id])
+    signal = (
+        {"kind": "candidate", "candidate": {"candidate": "test"}}
+        if kind == "candidate" else
+        {"kind": "description", "description": {"type": kind, "sdp": "test"}}
+    )
+    error = await room.relay_voice(sender_id, target_id, signal, state["voice_scope"])
+    assert (error is None) is allowed
+    visible_target = next(p for p in state["players"] if p["id"] == target_id)
+    assert visible_target["voice"] is allowed
+    assert bool(room.players[target_id].ws.messages) is allowed
+
+
+async def test_voice_scope_expires_on_phase_change_and_reconnection():
+    class FakeSocket:
+        async def send_text(self, payload):
+            pass
+
+    room = room_with("mafia", "mafia", "doctor", "citizen")
+    for participant in room.players.values():
+        participant.ws = FakeSocket()
+        participant.voice = True
+    room._set_phase("day", 30)
+    before = room._state_for(room.players["p1"])["voice_scope"]
+    signal = {"kind": "candidate", "candidate": {"candidate": "test"}}
+    room._set_phase("night", 30)
+    current = room._state_for(room.players["p1"])["voice_scope"]
+    assert current != before
+    assert await room.relay_voice("p1", "p2", signal, before) is not None
+    assert await room.relay_voice("p1", "p2", signal) is not None
+    assert await room.relay_voice("p1", "p2", signal, current) is None
+    room.join(FakeSocket(), "P2", None, room.players["p2"].key)
+    assert room.players["p2"].voice is False
+    assert room._state_for(room.players["p1"])["voice_scope"] != current
+    assert await room.relay_voice("p1", "p2", signal, current) is not None
 
 
 def test_day_interrogation_records_claim_questions_and_private_reads():
@@ -612,7 +847,7 @@ def test_only_host_can_remove_another_lobby_seat():
     assert "방장" in room.case_log[-1]
 
 
-async def test_broadcast_suppresses_duplicate_snapshots_but_replays_changes():
+async def test_broadcast_suppresses_duplicate_snapshots_but_replays_changes(monkeypatch):
     class FakeSocket:
         def __init__(self):
             self.frames: list[str] = []
@@ -624,7 +859,10 @@ async def test_broadcast_suppresses_duplicate_snapshots_but_replays_changes():
     socket = FakeSocket()
     room.join(socket, "Smoke", None, "broadcast-key-1234")
 
+    monkeypatch.setattr("app.game.time.time", lambda: 100.0)
     await room.broadcast()
+    assert json.loads(socket.frames[-1])["server_now"] == 100000
+    monkeypatch.setattr("app.game.time.time", lambda: 101.0)
     await room.broadcast()
     assert len(socket.frames) == 1
 

@@ -16,3 +16,12 @@ uploads/
 *.pem
 *.key
 .DS_Store
+
+# Build caches and local tools
+*.tsbuildinfo
+frontend/out/
+.idea/
+.vscode/
+*.p12
+*.pfx
+*.crt

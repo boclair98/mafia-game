@@ -260,6 +260,7 @@ class Player:
     nick: str
     coders_id: UUID | None
     ws: WebSocket | None
+    socket_owner: WebSocket | None = field(default=None, repr=False, compare=False)
     connected: bool = True
     ready: bool = False
     alive: bool = True
@@ -284,6 +285,7 @@ class Room:
         self.players: dict[str, Player] = {}
         self.host_id: str | None = None
         self.phase = "lobby"
+        self.phase_id = secrets.token_urlsafe(12)
         self.round = 0
         self.deadline = 0.0
         self.phase_started_at = time.time()
@@ -297,6 +299,7 @@ class Room:
         self.story: deque[str] = deque(maxlen=7)
         self.case_log: deque[str] = deque(maxlen=48)
         self.chat: deque[dict[str, str | int]] = deque(maxlen=40)
+        self.ghost_chat: deque[dict[str, str | int]] = deque(maxlen=80)
         self.reactions: deque[dict[str, str | int]] = deque(maxlen=20)
         self.questions: deque[dict[str, str | int]] = deque(maxlen=24)
         self.claims: deque[dict[str, str | int]] = deque(maxlen=36)
@@ -347,6 +350,7 @@ class Room:
         self._task: asyncio.Task | None = None
         self._broadcast_lock = asyncio.Lock()
         self._last_broadcast_payloads: dict[str, str] = {}
+        self._voice_generation = 0
         self.last_activity = time.time()
 
     def _record(self, line: str) -> None:
@@ -593,10 +597,13 @@ class Room:
         player_key: str,
     ) -> tuple[Player, bool]:
         self.touch()
+        self._voice_generation += 1
         existing = next((p for p in self.players.values() if p.key == player_key), None)
         if existing:
             existing.ws = ws
+            existing.socket_owner = ws
             existing.connected = True
+            existing.voice = False
             existing.nick = nick
             if coders_id is not None:
                 existing.coders_id = coders_id
@@ -612,6 +619,7 @@ class Room:
                 nick=self._unique_nick(nick),
                 coders_id=coders_id,
                 ws=ws,
+                socket_owner=ws,
             )
             self.players[player.id] = player
             if self.host_id is None:
@@ -624,6 +632,7 @@ class Room:
                 nick=self._unique_nick(nick),
                 coders_id=coders_id,
                 ws=ws,
+                socket_owner=ws,
                 alive=False,
                 role="spectator",
             )
@@ -643,12 +652,15 @@ class Room:
                 return candidate
         return f"{nick[:11]}-{secrets.token_hex(2)}"
 
-    def leave(self, pid: str) -> None:
-        self.touch()
+    def leave(self, pid: str, socket: WebSocket | None = None) -> bool:
         player = self.players.get(pid)
-        if not player:
-            return
+        # A replaced connection must never tear down the resumed seat.
+        owner = (player.socket_owner or player.ws) if player else None
+        if not player or (socket is not None and owner is not socket):
+            return False
+        self.touch()
         player.voice = False
+        player.socket_owner = None
         if self.phase == "lobby":
             self.players.pop(pid, None)
             self._last_broadcast_payloads.pop(pid, None)
@@ -663,6 +675,7 @@ class Room:
                     (p.id for p in self.players.values() if p.connected and not p.is_bot),
                     None,
                 )
+        return True
 
     def toggle_ready(self, pid: str) -> None:
         if self.phase == "lobby" and pid in self.players:
@@ -683,20 +696,43 @@ class Room:
         player.voice = enabled and player.connected
         return None
 
-    async def relay_voice(self, pid: str, target_id: str, data: object) -> str | None:
+    def _voice_channel(self, player: Player) -> str | None:
+        if self.phase in {"lobby", "gameover"}:
+            return "table"
+        if not player.alive or player.role == "spectator":
+            return "ghost"
+        if self.phase == "night" and player.role == "mafia":
+            return "mafia"
+        if self.phase in {"day", "vote", "defense"}:
+            return "table"
+        return None
+
+    def _voice_scope(self, player: Player) -> str | None:
+        channel = self._voice_channel(player)
+        return f"{self._voice_generation}:{channel}" if channel else None
+
+    async def relay_voice(
+        self, pid: str, target_id: str, data: object, scope: object = None
+    ) -> str | None:
         sender = self.players.get(pid)
         target = self.players.get(target_id)
-        if not sender or not sender.voice:
+        if not sender or not sender.voice or not sender.connected or sender.is_bot:
             return "먼저 음성 채팅에 참여해 주세요."
         if not target or target.is_bot or not target.connected or not target.voice or not target.ws:
             return "상대방이 음성 채팅에 연결되어 있지 않습니다."
+        current_scope = self._voice_scope(sender)
+        if (
+            not current_scope or scope != current_scope
+            or self._voice_scope(target) != current_scope or pid == target_id
+        ):
+            return "현재 단계에서 허용되지 않는 음성 연결입니다."
         if not isinstance(data, dict):
             return "잘못된 음성 연결 정보입니다."
         encoded = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
         if len(encoded) > 8192:
             return "음성 연결 정보가 너무 큽니다."
         await target.ws.send_text(json.dumps(
-            {"t": "voice_signal", "from": pid, "data": data},
+            {"t": "voice_signal", "from": pid, "data": data, "scope": current_scope},
             ensure_ascii=False,
             separators=(",", ":"),
         ))
@@ -834,6 +870,7 @@ class Room:
         self.story.clear()
         self.case_log.clear()
         self.chat.clear()
+        self.ghost_chat.clear()
         self.reactions.clear()
         self.questions.clear()
         self.claims.clear()
@@ -906,6 +943,7 @@ class Room:
         self.story.clear()
         self.case_log.clear()
         self.chat.clear()
+        self.ghost_chat.clear()
         self.reactions.clear()
         self.questions.clear()
         self.claims.clear()
@@ -947,7 +985,7 @@ class Room:
     def act(self, pid: str, target_id: str) -> str | None:
         actor = self.players.get(pid)
         target = self.players.get(target_id)
-        if self.phase != "night" or not actor or not actor.alive:
+        if self.phase != "night" or not actor or not actor.alive or self._decision_expired():
             return "지금은 밤 행동을 할 수 없습니다."
         if not target or not target.alive:
             return "선택할 수 없는 대상입니다."
@@ -965,21 +1003,26 @@ class Room:
     def vote(self, pid: str, target_id: str) -> str | None:
         voter = self.players.get(pid)
         target = self.players.get(target_id)
-        if self.phase != "vote" or not voter or not voter.alive:
+        if self.phase != "vote" or not voter or not voter.alive or self._decision_expired():
             return "지금은 투표할 수 없습니다."
-        if not target or not target.alive or target.id == voter.id:
+        if target_id != "skip" and (not target or not target.alive or target.id == voter.id):
             return "선택할 수 없는 대상입니다."
         self.votes[pid] = target_id
         return None
 
     def judge(self, pid: str, execute: bool) -> str | None:
         voter = self.players.get(pid)
-        if self.phase != "verdict" or not voter or not voter.alive:
+        if self.phase != "verdict" or not voter or not voter.alive or self._decision_expired():
             return "지금은 최종 판결을 내릴 수 없습니다."
         if pid == self.accused_id:
             return "피고인은 자신의 판결에 참여할 수 없습니다."
         self.judgements[pid] = bool(execute)
         return None
+
+    def _decision_expired(self) -> bool:
+        # The one-second ticker is presentation cadence, not an authority
+        # window: packets at or after the deadline cannot change the result.
+        return bool(self.deadline and time.time() >= self.deadline)
 
     def add_reaction(self, pid: str, emoji: str) -> str | None:
         player = self.players.get(pid)
@@ -1129,6 +1172,8 @@ class Room:
                 return "사망자는 토론에 참여할 수 없습니다."
             visibility = "all"
         elif self.phase in {"lobby", "vote", "gameover"}:
+            if self.phase == "vote" and (not player.alive or player.role == "spectator"):
+                return "사망자와 관전자는 투표 중 공개 대화에 참여할 수 없습니다."
             visibility = "all"
         else:
             return "지금은 대화할 수 없습니다."
@@ -1137,6 +1182,23 @@ class Room:
             {"id": secrets.token_hex(4), "from": player.nick, "from_id": player.id, "text": text,
              "visibility": visibility, "at": int(now * 1000)}
         )
+        return None
+
+    def add_ghost_chat(self, pid: str, raw: str) -> str | None:
+        player = self.players.get(pid)
+        if not player or (player.alive and player.role != "spectator"):
+            return "사망자와 관전자만 사후 수사실에서 대화할 수 있습니다."
+        text = " ".join(raw.strip().split())[:160]
+        if not text:
+            return None
+        now = time.time()
+        if now - player.last_chat_at < 0.45:
+            return "메시지를 너무 빠르게 보내고 있습니다."
+        player.last_chat_at = now
+        self.ghost_chat.append({
+            "id": secrets.token_hex(4), "from": player.nick,
+            "from_id": player.id, "text": text, "at": int(now * 1000),
+        })
         return None
 
     def _deal_private_leads(self, active: list[Player]) -> None:
@@ -1962,7 +2024,8 @@ class Room:
             self._set_phase("dawn", self._seconds("dawn"))
 
     def _resolve_vote(self) -> None:
-        counts = Counter(self.votes.values())
+        counts = Counter(target for target in self.votes.values() if target != "skip")
+        skipped = sum(target == "skip" for target in self.votes.values())
         for oath in self.oaths.values():
             if oath.get("round") == self.round and oath.get("owner_id") in self.votes:
                 oath["kept"] = self.votes.get(oath["owner_id"]) == oath.get("target_id")
@@ -1979,14 +2042,19 @@ class Room:
             if len(ordered) == 1 or ordered[0][1] > ordered[1][1]:
                 accused = self.players.get(ordered[0][0])
         if not accused:
-            line = "표가 갈렸습니다. 최종 피고 없이 오늘의 투표를 종료합니다."
+            line = (
+                "지목된 표가 없습니다. 최종 피고 없이 오늘의 투표를 종료합니다."
+                if not counts else
+                "표가 갈렸습니다. 최종 피고 없이 오늘의 투표를 종료합니다."
+            )
+            line += f" 기권 {skipped}표."
             self._record(line)
             self._moment("vote", line)
             self._set_phase("result", self._seconds("result"))
             return
         self.accused_id = accused.id
         self.judgements.clear()
-        line = f"{accused.nick}님이 최종 피고로 지목되었습니다. 최후 변론을 시작합니다."
+        line = f"{accused.nick}님이 최종 피고로 지목되었습니다. 최후 변론을 시작합니다. 기권 {skipped}표."
         self._record(line)
         self._moment("accused", line, target=accused.id)
         self._set_phase("defense", self._seconds("defense"))
@@ -2146,7 +2214,9 @@ class Room:
             await asyncio.gather(*writes, return_exceptions=True)
 
     def _set_phase(self, phase: str, seconds: int) -> None:
+        self._voice_generation += 1
         self.phase = phase
+        self.phase_id = secrets.token_urlsafe(12)
         self.phase_started_at = time.time()
         self.deadline = time.time() + seconds if seconds else 0
 
@@ -2203,7 +2273,7 @@ class Room:
 
     def _state_for(self, viewer: Player) -> dict:
         vote_counts = (
-            Counter(self.votes.values())
+            Counter(target for target in self.votes.values() if target != "skip")
             if self.phase in {"defense", "verdict", "result", "gameover"}
             else Counter()
         )
@@ -2311,6 +2381,9 @@ class Room:
             "director_beats": list(self.director_beats)[-5:],
             "tips": list(self.tips)[-12:],
             "phase": self.phase,
+            "phase_id": self.phase_id,
+            "server_now": now_ms,
+            "voice_scope": self._voice_scope(viewer),
             "round": self.round,
             "deadline": round(self.deadline * 1000),
             "winner": self.winner,
@@ -2339,7 +2412,11 @@ class Room:
                     "bot_profile": p.bot_profile if p.is_bot else None,
                     "bot_persona": self._bot_persona(p)["label"] if p.is_bot else None,
                     "score": p.score,
-                    "voice": p.voice and p.connected and not p.is_bot,
+                    "voice": (
+                        p.voice and p.connected and not p.is_bot
+                        and self._voice_scope(viewer) is not None
+                        and self._voice_scope(p) == self._voice_scope(viewer)
+                    ),
                 }
                 for p in self.players.values()
             ],
@@ -2422,17 +2499,19 @@ class Room:
                     "voter_id": voter_id,
                     "voter": self.players[voter_id].nick,
                     "target_id": target_id,
-                    "target": self.players[target_id].nick,
+                    "target": "기권" if target_id == "skip" else self.players[target_id].nick,
                 }
                 for voter_id, target_id in self.votes.items()
                 if show_ballot_feed
-                and voter_id in self.players and target_id in self.players
+                and voter_id in self.players and (target_id == "skip" or target_id in self.players)
             ],
+            "skip_votes": sum(target == "skip" for target in self.votes.values()) if show_ballot_feed else 0,
             "story": list(self.story),
             "case_log": list(self.case_log),
             "clues": list(self.clues),
             "guide": self._guide_for(viewer),
             "chat": visible_chat[-30:],
+            "ghost_chat": list(self.ghost_chat) if (not viewer.alive or viewer.role == "spectator") else [],
             "reactions": recent_reactions,
             "speaker_id": self.speaker_id,
             "speaker_deadline": round(self.speaker_deadline * 1000),
@@ -2460,14 +2539,20 @@ class Room:
                 socket = player.ws
                 if not player.connected or socket is None:
                     continue
-                payload = json.dumps(
-                    self._state_for(player),
+                state = self._state_for(player)
+                # Clock calibration changes on every read, but must not turn
+                # unchanged rooms back into a per-second snapshot flood.
+                calibration = state.pop("server_now")
+                comparison = json.dumps(
+                    state,
                     ensure_ascii=False,
                     separators=(",", ":"),
                 )
-                if self._last_broadcast_payloads.get(player.id) == payload:
+                if self._last_broadcast_payloads.get(player.id) == comparison:
                     continue
-                self._last_broadcast_payloads[player.id] = payload
+                self._last_broadcast_payloads[player.id] = comparison
+                state["server_now"] = calibration
+                payload = json.dumps(state, ensure_ascii=False, separators=(",", ":"))
 
                 async def deliver(
                     recipient: Player = player,
@@ -2496,6 +2581,10 @@ class RoomManager:
     def __init__(self, max_rooms: int | None = None) -> None:
         self._rooms: dict[str, Room] = {}
         self.max_rooms = max_rooms or settings.max_rooms
+
+    def find(self, name: str) -> Room | None:
+        """Look up an invitation without implicitly creating a new room."""
+        return self._rooms.get(name)
 
     def get(self, name: str) -> Room:
         if name not in self._rooms:

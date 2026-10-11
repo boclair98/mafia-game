@@ -20,6 +20,21 @@
 
 ![봉인 문서와 증거물로 구성한 검은 자정 사건 현장](frontend/public/black-midnight-cinematic-wide-v1.webp)
 
+## 2026-10-11 디자인·실시간 개선
+
+- **첫 화면:** 비 오는 수사실, 절제된 금색·버건디와 명확한 첫 사건 CTA. 친구·AI 7명·입문 AI 3명 모드와 방 코드 참가를 구분합니다. 명예의 전당과 패스포트는 실제 기능 이름으로 안내합니다.
+- **게임 HUD:** 현재 단계·서버 기준 남은 시간·행동이 우선 보입니다. 모바일 사건/수사/대화/내 정보 탭과 44px 터치 영역, 읽기 쉬운 본문을 적용했습니다. 전환 연출은 1.8초이며 긴 라운드 전체 화면 연출을 없애 상시 안내 카드로 확인합니다.
+- **대화:** 한글 조합 중 Enter를 전송하지 않습니다. 이전 대화를 읽을 때 강제 이동하지 않으며 최신 대화 버튼을 제공합니다. 사망자와 관전자는 유령 비밀 채널에서 대화합니다. 생존자에게 이 메시지·음성 채널을 전달하지 않습니다.
+- **선택:** 피고 지목과 최종 처형/석방을 구분합니다. 기권도 제출한 표로 집계하되 피고 후보 계산에서는 제외합니다. 표시되는 공개 반응 점수는 범인 확률이 아닙니다.
+- **연결·권한:** 새 연결만 기존 좌석을 제어합니다. 중복 탭의 이전 연결은 종료하고 자동 재접속 경쟁을 멈춥니다. 없는 방·만석·혼자 전용 방의 오류가 실제 브라우저 close 프레임으로 전달됩니다.
+- **상태 동기화:** 매 단계 `phase_id`를 새로 만들고 밤 행동·투표·판결에서 검증합니다. 서버 마감 이후 및 지난 단계 요청은 거부합니다. `server_now`와 브라우저 monotonic 경과 시간으로 기기 시계 변경 영향을 줄입니다. 전송과 서버 접수를 구분합니다.
+- **음성:** `voice_scope`와 개인별 허용 참가자만 연결합니다. 단계·채널 변경 때 기존 peer·수신 미디어·ICE 큐를 정리하고 오래된 신호를 거부합니다. P2P의 악성 클라이언트 미디어 통제에는 SFU가 필요합니다.
+- **초기 다운로드:** 서비스워커 설치 때 모든 장면 이미지를 미리 받지 않고, 방문한 이미지부터 캐시합니다. 기존 자산·로그인·기록·DB 스키마는 유지합니다.
+
+구현 근거와 Node.js/Socket.IO 참고 엔진, Role Interface 및 React HUD 구조는 [아키텍처 설계](docs/ARCHITECTURE.md)를 참고하세요. 실제 서버는 FastAPI를 유지합니다. 추가 직업 10종, 전지적 유령 관전, TURN/SFU, 서버 장애 후 방 복구는 이번 배포 기능이 아닙니다. 전체 역할은 경기 종료 후 공개합니다.
+
+검증: 게임/WS/추리 회귀 109개와 WebRTC scope 회귀 3개를 통과했습니다. 로컬 5방×8명(40연결) 65.91초 부하에서 채팅 1,282/1,282건 접수, 2,550 pong, 오류 0, 재접속 1건과 연결 종료 후 0.20초 내 방/연결 0을 확인했습니다. 동일 머신 ping 왕복 p50 16ms·p95 328ms이며 게임 행동 ACK 지연이나 운영 수용 인원을 뜻하지 않습니다. 동시 burst 측정은 p95 500–719ms여서 추가 성능 개선이 필요합니다. 실제 마이크 송수신·1,000명 부하·사람 3판의 사용성·실사용 p75 Web Vitals는 별도 검증이 필요합니다. PostgreSQL 통합 테스트는 CI에서 분리된 테스트 DB를 사용합니다.
+
 ## 목차
 
 - [프로젝트 개요](#프로젝트-개요)
@@ -480,6 +495,7 @@ alembic upgrade head
 cd frontend
 pnpm install --frozen-lockfile
 pnpm lint
+node --test tests/voice-scope.test.mjs
 pnpm build
 ~~~
 
@@ -508,7 +524,10 @@ python -m pytest tests/test_game_flow.py tests/test_ws.py -q
 
 ~~~text
 ws://localhost:8000/api/ws?room=<room-code>&nick=<display-name>&key=<resume-key>
+# 기존 방 참가에만: &join_only=true
 ~~~
+
+밤 행동·투표·판결은 `{t, phase_id, ...}`로 요청합니다. `phase_id`는 현재 개인 state에서 받은 값을 그대로 사용합니다. 누락·만료 시 `stale_phase`와 최신 state가 반환됩니다. 기권은 `{t:"vote", phase_id, target:"skip"}`이며 유령 대화는 `{t:"ghost_chat", text}`입니다. 음성 신호는 서버가 보낸 현재 `voice_scope`를 `scope` 필드에 넣습니다. 비밀정보와 접속 복구 키를 로그로 남기지 마세요.
 
 대표적인 클라이언트 → 서버 메시지:
 
@@ -516,7 +535,7 @@ ws://localhost:8000/api/ws?room=<room-code>&nick=<display-name>&key=<resume-key>
 | --- | --- |
 | ready, start, rematch | 준비·게임 시작·재경기 |
 | fill_bots, remove_seat, pace | 방장 좌석·속도 제어 |
-| action | 밤 역할 능력 대상 선택 |
+| action | 밤 역할 능력 대상 선택, 현재 state의 phase_id 필수 |
 | chat, react | 공개·비밀 채팅과 빠른 반응 |
 | question, claim, read | 질문·공식 진술·신뢰/보류/의심 평가 |
 | pressure, tip | 긴급 지목과 익명 제보 |
