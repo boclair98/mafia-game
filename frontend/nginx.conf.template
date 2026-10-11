@@ -35,6 +35,9 @@ server {
   # plain HTTP proxy. Same Host/$proxy_host reasoning as /api/ (see the
   # CRITICAL comment there).
   location = /api/ws {
+    # Resume keys are in the handshake query; never write them to access/error logs.
+    access_log off;
+    error_log /dev/null;
     set $backend "${BACKEND_URL}";
     proxy_pass        $backend;
     # WebSocket upgrade needs HTTP/1.1 and the two hop-by-hop headers

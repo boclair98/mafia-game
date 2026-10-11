@@ -478,7 +478,7 @@ uvicorn app.main:app --reload --port 8000
 | `MAX_ROOMS` / `MAX_CONNECTIONS` | 프로세스별 방·WebSocket 상한 | 선택 | 부하 테스트 후 운영 환경 변수로 설정 |
 | `BROADCAST_TIMEOUT` / `LEADERBOARD_CACHE_TTL` | 브로드캐스트 타임아웃·리더보드 캐시 | 선택 | 운영 환경 변수로 설정 |
 
-실제 토큰·비밀번호·쿠키는 저장소나 README에 넣지 않습니다. coders.kr 배포 인증은 승인된 로컬 secret 저장소에서만 읽습니다.
+WebSocket 복구 키가 query에 포함되므로 nginx의 해당 경로 접근/오류 로그를 끄고 Uvicorn 접속 INFO 로그를 비활성화합니다. API 오류는 warning/error 수준에서 확인합니다. 실제 토큰·비밀번호·쿠키는 저장소나 README에 넣지 않습니다. coders.kr 배포 인증은 승인된 로컬 secret 저장소에서만 읽습니다.
 
 기존 데이터베이스를 업데이트할 때는 백엔드 가상환경에서 마이그레이션을 적용합니다.
 
