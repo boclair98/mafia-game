@@ -77,3 +77,23 @@
   .tutorial-controls > button { width: 44px; min-width: 44px; height: 44px; }
   .tutorial-controls > .tutorial-done { min-width: 92px; }
 }
+
+/* Keep the four real entry paths reachable before the page's fixed platform UI. */
+.midnight-entry-shortcuts { min-width: 0; }
+.midnight-entry-shortcuts > span { line-height: 1.4; }
+.midnight-entry-shortcuts > button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.midnight-footer { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+
+@media(max-width:600px) {
+  .midnight-entry-shortcuts { gap: 6px; }
+  .midnight-entry-shortcuts > span { font-size: 11px; }
+  .midnight-entry-shortcuts > button { min-height: 44px; padding: 0 8px; }
+  .midnight-footer { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+}

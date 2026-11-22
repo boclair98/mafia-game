@@ -78,6 +78,39 @@ for (const viewport of [{ width: 360, height: 800 }, { width: 390, height: 844 }
   });
 }
 
+for (const viewport of [{ width: 360, height: 800 }, { width: 390, height: 844 }]) {
+  test(`mobile home entry paths remain touchable above the fixed utility zone ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    const primary = page.getByRole("button", { name: "첫 사건 시작하기", exact: true });
+    const shortcuts = page.getByRole("group", { name: "다른 플레이 방식" });
+    await expect(primary).toBeVisible();
+    await expect(shortcuts).toBeVisible();
+    await expect(shortcuts.getByRole("button")).toHaveCount(3);
+    await expectNoOverflow(page);
+
+    const primaryBox = await primary.boundingBox();
+    const shortcutButtons = await shortcuts.getByRole("button").all();
+    expect(primaryBox?.height).toBeGreaterThanOrEqual(44);
+    expect((primaryBox?.y ?? viewport.height) + (primaryBox?.height ?? 0)).toBeLessThan(viewport.height - 72);
+    for (const button of shortcutButtons) {
+      const box = await button.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(44);
+      expect((box?.y ?? viewport.height) + (box?.height ?? 0)).toBeLessThan(viewport.height - 72);
+    }
+
+    await shortcuts.getByRole("button", { name: "혼자 수사", exact: true }).click();
+    await expect(page.locator(".join-mode-picker button.solo")).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("Escape");
+    await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }));
+    const footerAction = page.getByRole("button", { name: "설정·운영 정책", exact: true });
+    const footerBox = await footerAction.boundingBox();
+    expect(footerBox).not.toBeNull();
+    expect(viewport.height - (footerBox!.y + footerBox!.height)).toBeGreaterThanOrEqual(72);
+    await expectNoOverflow(page);
+  });
+}
+
 test("rule preview waits for the player and supports manual steps on mobile", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");

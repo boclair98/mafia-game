@@ -41,8 +41,8 @@ export default memo(function MidnightLanding({ players, invited, onPlay, onJoin,
         <h1 id="midnight-title">이 방 안에,<br /> <em>범인이 있다.</em></h1>
         <p className="midnight-hero-copy">같은 밤. 다른 진실.<br />단서를 읽고, 진술을 의심하고, 당신의 한 표로<br className="desktop-break" /> 사건의 결말을 바꾸세요.</p>
         <div className="midnight-hero-actions"><button className="midnight-primary" onClick={() => onPlay(invited ? "party" : "first")}><Fingerprint size={20} />{invited ? "초대받은 사건에 합류" : "첫 사건 시작하기"}<ArrowUpRight size={20} /></button><button className="midnight-guide" onClick={onGuide}><BookOpen size={17} />룰 미리보기</button></div>
-        {!invited && <div className="midnight-entry-shortcuts" aria-label="다른 플레이 방식">
-          <span>다른 방식</span>
+        {!invited && <div className="midnight-entry-shortcuts" role="group" aria-label="다른 플레이 방식">
+          <span>다른 플레이 방식</span>
           <button type="button" onClick={() => onPlay("party")}>친구와 플레이</button>
           <button type="button" onClick={() => onPlay("solo")}>혼자 수사</button>
           <button type="button" onClick={onJoin}>초대 코드 입력</button>
