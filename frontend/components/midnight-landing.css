@@ -91,6 +91,11 @@
 }
 .midnight-footer { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 
+@media(min-width:1200px) {
+  /* Keep the secondary room-code action clear of Coders' fixed utility button. */
+  .midnight-mode-heading > button { margin-right: clamp(144px, 11.2vw, 164px); }
+}
+
 @media(max-width:600px) {
   .midnight-entry-shortcuts { gap: 6px; }
   .midnight-entry-shortcuts > span { font-size: 11px; }

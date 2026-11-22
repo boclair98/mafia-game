@@ -41,6 +41,11 @@ for (const viewport of [{ width: 360, height: 800 }, { width: 390, height: 844 }
     await page.evaluate(() => document.fonts.ready);
     expect(await page.evaluate(() => document.fonts.check('15px "Pretendard"'))).toBe(true);
     await expectNoOverflow(page);
+    if (viewport.width >= 1200) {
+      const roomEntry = await page.getByRole("button", { name: "방 코드로 참가" }).boundingBox();
+      expect(roomEntry).not.toBeNull();
+      expect(roomEntry!.x + roomEntry!.width).toBeLessThan(viewport.width - 170);
+    }
     await page.getByRole("button", { name: "첫 사건 시작하기", exact: true }).click();
     await expect(page.locator(".join-mode-picker button.first")).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator("#join-room-help")).toContainText("첫 사건을 만들기 위한 코드");
