@@ -113,9 +113,30 @@ Windows/Python3.11.5, 논리CPU16, 별도의 `mafia_load` PostgreSQL과 정상 �
 
 위 경로는 작업 디렉터리의 `g/outputs`이며 저장소 내부 경로가 아니다. 작은 표본의 p99는 최대값과 같을 수 있다. 이 결과는 플랫폼 인증·패스포트 HTTP 조회/집계 부하, 브라우저 렌더링, TLS·proxy, 음성 미디어, 다중 API 복제와40,000명 수용량을 포함하지 않는다.
 
-### 별도 격리 CI 검사 — 실행 대기
+### 별도 격리 CI 검사 — 실제 완료
 
-`.github/workflows/load-check.yml`에 수동25/50/100명 선택, 정상 시계420초 관측, fresh PostgreSQL과 durable API를 사용하는 격리 검사를 준비했다. 실행기는 `ubuntu-latest`, 작업 상한은15분이며 운영 URL에 요청하지 않는다. JSON은 job log에 남기고 별도 artifact storage를 업로드하지 않는다. **이 문서 작성 시에는 실행 대기이며 성공이나100명 통과로 표시하지 않는다.** 실제 실행의 commit/run ID·완료 상태·JSON을 확인한 뒤 별도 결과를 기록해야 한다.
+`.github/workflows/load-check.yml`은 수동25/50/100명 선택, 정상 시계420초 관측, fresh PostgreSQL과 durable API를 사용한다. 공개 저장소의 무료 표준 `ubuntu-latest` 실행기를 사용하며 작업 상한은15분이다. 운영 URL에 요청하지 않고 JSON은 job log에 남긴다. 별도 artifact storage·유료/larger runner·새 클라우드를 사용하지 않는다. [GitHub의 표준 공개 실행기 조건](https://docs.github.com/en/actions/concepts/billing-and-usage)을 이번에 확인했다.
+
+[실행45010737934](https://github.com/boclair98/mafia-game/actions/runs/45010737934), 소스 `d825173cdb43ab4c4b0a7cf8f852f89b446c2ff8`에서 terminal **success**와 전체 JSON을 직접 확인했다. 이후 문서 변경은 이 시험의 애플리케이션 코드를 바꾸지 않는다.
+
+| 항목 | 실제 결과 |
+| --- | --- |
+| 합성 연결 | 100/100명, 4명씩25개 방 |
+| 관측 시간 | 420.003초, ramp 포함469.915초 |
+| 정확히100명 연결된 시간 | 407.724초. 계획적 재접속 구간 최소75명 |
+| 같은 좌석 복귀 | 25/25 |
+| 확인 명령 | 1,627/1,627개, 오류0 |
+| 경기·단계 | 9경기 종료·rematch9회. 낮/투표/변론/판결/종료 포함 모든 단계 |
+| 명령 ACK p95 / p99 | 15.434 /60.043ms |
+| ping p95 / p99 | 0.762 /3.502ms |
+| 가입 p95 / p99 | 12.398 /15.829ms |
+| 재접속 handshake p95 / p99 | 10.025 /10.169ms. 발생기 입장 대기 제외 |
+| 계획적 단절→복원 전체 p95 / p99 | 11,733.248 /12,101.789ms. 의도된250ms+2joins/sec 대기 포함 |
+| 발생기 | CPU8.821초, event-loop lag p99 2.038ms |
+| 환경 | 실제 Ubuntu26.04.1 / Python3.12.16 / 논리CPU4개 |
+| 자원 표본 | 최소 가용 RAM14,873.9MiB. API VmRSS=VmHWM97,536kB(95.25MiB), 누적 CPU39초/경과7분51초 |
+
+수신16,403프레임/75,241,233바이트다. 확인 명령은 밤 행동142, 공식 진술91, 채팅1,092, 투표91, 판결66, 준비102, 시작34, rematch9개다. handshake10ms를 전체 끊김 복구 시간이라고 광고하거나100명이 끊김 없이420초 내내 연결됐다고 말하지 않는다.
 
 마지막 API 프로세스의 RSS/누적 CPU 표본과 `VmHWM`을 읽을 수 있지만, 이는 지속적인 시스템·DB·네트워크 관측을 대신하지 않는다. CI에서100명이 통과하더라도 실제 Coders의 proxy·quota·다중 복제·음성 경로 또는40,000명을 검증한 결과가 아니다.
 
