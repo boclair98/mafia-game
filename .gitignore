@@ -25,3 +25,5 @@ frontend/out/
 *.p12
 *.pfx
 *.crt
+frontend/playwright-report/
+frontend/test-results/

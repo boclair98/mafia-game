@@ -141,7 +141,7 @@ async def game_socket(
                 continue
             if command not in {"ping", "voice_signal"}:
                 player.last_command_at = now
-            if command in {"action", "vote", "judge"} and msg.get("phase_id") != arena.phase_id:
+            if command in {"action", "vote", "judge", "challenge", "challenge_reply"} and msg.get("phase_id") != arena.phase_id:
                 await ws.send_text(json.dumps({
                     "t": "error", "code": "stale_phase",
                     "message": "진행 단계가 바뀌었습니다. 최신 화면에서 다시 선택하세요. 계속되면 새로고침해 주세요.",
@@ -243,6 +243,20 @@ async def game_socket(
                     error = arena.add_question(player.id, str(msg.get("text", "")))
                 case "claim":
                     error = arena.add_claim(player.id, str(msg.get("text", "")))
+                case "challenge":
+                    if not all(isinstance(msg.get(field), str) for field in ("claim_id", "clue_id", "text")):
+                        error = "공식 진술·공개 기록·질문 형식을 확인해 주세요."
+                    else:
+                        error = arena.challenge_claim(
+                            player.id, msg["claim_id"], msg["clue_id"], msg["text"],
+                        )
+                case "challenge_reply":
+                    if not all(isinstance(msg.get(field), str) for field in ("challenge_id", "text", "kind")):
+                        error = "답변할 질문과 설명 형식을 확인해 주세요."
+                    else:
+                        error = arena.reply_challenge(
+                            player.id, msg["challenge_id"], msg["text"], msg["kind"],
+                        )
                 case "tip":
                     error = arena.add_tip(player.id, str(msg.get("text", "")))
                 case "read":

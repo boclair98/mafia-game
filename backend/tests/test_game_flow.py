@@ -680,7 +680,7 @@ def test_private_leads_are_isolated_and_can_be_publicly_revealed_once():
         "suspect_id": "p3",
     }
     assert "authentic" not in public
-    assert room.case_log[-1] == "봉인 증거 공개 — P1: 봉인 훼손 감정"
+    assert room.case_log[-1] == "미확인 제보 공개 — P1: 봉인 훼손 감정"
 
 
 def test_private_lead_reveal_requires_a_living_player_during_day():

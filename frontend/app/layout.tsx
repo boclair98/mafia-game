@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 import { WarmingBar } from "@/components/WarmingBanner";
 import "./globals.css";
+import "./fonts.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://black-midnight.coders.kr"),
@@ -41,6 +42,9 @@ export const viewport = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ko">
+      <head>
+        <link rel="preload" href="/fonts/PretendardVariable.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
+      </head>
       <body>
         <WarmingBar />
         <AppErrorBoundary>{children}</AppErrorBoundary>

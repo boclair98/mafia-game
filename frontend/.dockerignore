@@ -1,5 +1,11 @@
 node_modules
 .next
+out
+playwright-report
+test-results
+.env
+.env.*
+.coders
 .git
 .gitignore
 *.md

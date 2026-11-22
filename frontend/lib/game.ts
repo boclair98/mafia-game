@@ -25,14 +25,14 @@ export type InterrogationQuestion = { id: string; from: string; from_id: string;
 export type SealedClaim = { id: string; speaker_id: string; speaker: string; text: string; round: number; at: number };
 export type CaseMoment = { id: string; kind: string; text: string; actor: string | null; target: string | null; round: number };
 export type BallotEntry = { voter_id: string; voter: string; target_id: string; target: string };
-export type CaseClue = { id: string; code: string; round: number; title: string; detail: string; outcome: string; suspect_ids: string[]; suspects: string[] };
+export type CaseClue = { id: string; event_id?: string; code: string; round: number; title: string; detail: string; outcome: string; suspect_ids: string[]; suspects: string[] };
 export type PrivateLead = { id: string; title: string; detail: string; suspect_id: string; revealed: boolean };
 export type PublicLead = { id: string; owner_id: string; owner: string; title: string; detail: string; round: number; suspect_id: string };
 export type RoundEvent = { id: string; title: string; tag: string; copy: string; sealed_pressure: boolean };
 export type CaseAward = { id: string; player_id: string; player: string; title: string; copy: string };
 export type AnonymousTip = { id: string; text: string; round: number; at: number };
 export type MemorySeal = { id: string; owner_id: string; owner: string; text: string; round: number; sealed_at: number };
-export type SceneFragment = { id: string; time: string; title: string; detail: string };
+export type SceneFragment = { id: string; event_id?: string; time: string; title: string; detail: string };
 export type SceneResult = { round: number; score: number; total: number; correct_pairs: number; causal_pairs?: number; deduction?: string; submitted_at: number };
 export type OathState = { id: string; owner_id: string; owner: string; target_id: string; target: string; text: string; round: number; kept: boolean | null };
 export type TheoryStatus = "confirmed" | "partial" | "broken";
@@ -62,6 +62,36 @@ export type AISocial = { player_id: string; player: string; persona: string; emo
 export type CaseBadge = { id: string; title: string; copy: string };
 export type CaseHighlight = { kind: string; title: string; copy: string };
 export type SecretContract = { id: string; owner_id: string; owner: string; target_id: string; target: string; text: string; round: number; accepted: boolean | null };
+export type NightSummary = {
+  id: string;
+  round: number;
+  outcome: "quiet" | "attack" | "rescue" | "guard";
+  title: string;
+  detail: string;
+};
+export type CrossExamination = {
+  id: string;
+  round: number;
+  asker_id: string;
+  asker: string;
+  target_id: string;
+  target: string;
+  claim_id: string;
+  claim_text: string;
+  clue_id: string;
+  clue_title: string;
+  clue_detail: string;
+  question: string;
+  response: string | null;
+  response_kind: "clarify" | "revise" | null;
+  responded_at: number | null;
+  at: number;
+};
+export type NightReplay = NightSummary & {
+  actions: { actor_id: string; actor: string; role: Role; target_id: string; target: string; kind: "attack" | "heal" | "investigate" | "guard" }[];
+  victim_id: string | null;
+  victim: string | null;
+};
 
 export type GameState = {
   t: "state";
@@ -88,7 +118,7 @@ export type GameState = {
   theory_board: TheoryState[];
   deadline: number;
   winner: "mafia" | "citizen" | "trickster" | null;
-  pace: "quick" | "classic";
+  pace: "first" | "quick" | "classic";
   host: string | null;
   min_players: number;
   max_players: number;
@@ -105,6 +135,7 @@ export type GameState = {
     mission: string;
     mission_completed: boolean;
     can_tip: boolean;
+    can_challenge: boolean;
     reads: Record<string, ReadStance>;
     can_leave_will: boolean;
     private_lead: PrivateLead | null;
@@ -129,6 +160,9 @@ export type GameState = {
   story: string[];
   case_log: string[];
   clues: CaseClue[];
+  night_summary: NightSummary | null;
+  cross_examinations: CrossExamination[];
+  night_replay: NightReplay[];
   public_leads: PublicLead[];
   memory_reveals: MemorySeal[];
   scene_progress: { completed: number; total: number };

@@ -1,20 +1,12 @@
 #!/bin/sh
 set -e
 
-# Wait up to 60s for Postgres to accept TCP — the coders.kr platform
-# brings the StatefulSet up in parallel with the build, so the very
-# first container start can race readiness.
-if [ -n "${DATABASE_URL:-}" ]; then
-  host="$(printf '%s' "$DATABASE_URL" | sed -E 's#.*@([^:/]+).*#\1#')"
-  port="$(printf '%s' "$DATABASE_URL" | sed -nE 's#.*@[^:]+:([0-9]+).*#\1#p')"
-  port="${port:-5432}"
-  if [ -n "$host" ]; then
-    i=0
-    while [ "$i" -lt 60 ] && ! (echo > "/dev/tcp/${host}/${port}") 2>/dev/null; do
-      i=$((i+1)); sleep 1
-    done
-  fi
-fi
+# /dev/tcp is a bash extension, not available in Debian's /bin/sh (dash).
+# A real socket probe starts immediately when PostgreSQL is ready and applies
+# connection/retry timeouts without logging credentials. DNS follows OS limits.
+# Alembic then checks
+# authentication and schema readiness; accepting TCP alone is not that proof.
+uv run python -m app.core.readiness
 
 uv run alembic upgrade head
 

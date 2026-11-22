@@ -1,8 +1,37 @@
-# 검은 자정: 게임·통신·HUD 설계
+# 검은 자정: 게임·증거·통신 설계
 
-기존 서비스는 **Next.js / React + FastAPI WebSocket + PostgreSQL**이다. 이번 개선은 이 스택을 유지한다. 아래 Node.js / Socket.IO 코드는 요구한 엔진 구조를 보여 주는 **참고 구현**이며, 배포 서버의 실행 코드가 아니다. 완전한 무중단 통신이나 외부 음성방의 스포일러 차단을 보장하지 않는다.
+이 문서는 2026-11-22 개편 코드의 책임 경계와 공개 범위, 판정·실패 조건을 설명한다. 빌드 성공, 테스트 성공, 배포 플랫폼의 `ready`, 실제 운영 여정과 사용자 반응은 서로 다른 증거다. 이 문서 자체가 특정 커밋의 출시 완료나 무결함을 보증하지 않는다.
 
-## 1. 실제 요청과 상태의 흐름
+실제 스택은 **Next.js 16 / React 19 정적 프런트엔드 + nginx + FastAPI WebSocket + PostgreSQL**이다. 이번 변경은 다른 엔진으로 이관하지 않는다. 봇은 Python 규칙·템플릿 기반이며 외부 유료 LLM을 호출하지 않는다. 화면의 구체적인 시각 설계는 [design.md](../design.md), 설치·환경 변수·실행 명령은 [README](../README.md)를 참고한다.
+
+## 1. 우선 사용자 여정과 바꾸지 않는 것
+
+```text
+혼자 첫 사건 / 친구 방 진입
+  → 역할 확인 → 밤의 최종 선택 → 서버 정산
+  → 공개 사건 보고와 개인 결과 확인
+  → 공식 진술 → 공개 기록을 인용한 질문 → 해명 또는 판단 수정
+  → 용의자 투표 → 최후 변론 → 처형/석방 판결
+  → 승패 확정 → 실제 행동 복기 / 사건 리포트 / 로그인 유저 진행 기록
+```
+
+개선의 목적은 기능 개수보다 **무엇이 확인된 사실인지, 누가 무엇을 주장했는지, 다음에 무엇을 판단해야 하는지**를 분리하는 것이다. 인용 질문과 답변은 토론 기록이며 자동 유죄 판정이 아니다. 타임라인 역시 관찰하지 않은 시민 이동이나 역할별 이동 시간을 지어내는 장치가 아니다.
+
+기존 솔로/친구 모드, 역할 능력, 사망자 채널, 호스트 복구, WebRTC 범위 검사, 수사관 패스포트는 보존한다. 진행 중 솔로 방에 친구를 합류시키거나 방 상태 전체를 DB에 영속화하는 변경은 포함하지 않는다.
+
+## 2. 구현 책임과 저장 경계
+
+| 경로 | 책임 | 보장하지 않는 것 |
+| --- | --- | --- |
+| `backend/app/game.py::Room` | 방·페이즈·권한·정산·개인별 상태·게임 내 기록의 권위 | 프로세스 장애 후 경기 복구 |
+| `backend/app/routes/ws.py` | 연결 좌석 바인딩, 패킷/빈도 검사, 현재 소켓·phase 검증, 명령 라우팅 | 모든 명령의 영속 ACK나 재시도 큐 |
+| `backend/app/models.py`, `services/passport.py` | 로그인 유저의 점수·사건 요약·XP/진행 기록 저장 | 전체 채팅·행동·질문 원문의 영구 리플레이 |
+| `frontend/lib/ws.ts` | 연결·재접속·개인 snapshot 수신 | 로컬 send만으로 서버 접수 확정 |
+| 게임 HUD와 `CrossExaminationPanel` | 서버 권한과 현재 기록을 표현하고 사용자 의도를 전송 | 자유 문장 진위나 실제 유죄 판정 |
+
+진행 중 방, 선택, 채팅, 진술, 증언 대조, AI 메모리와 밤 원장은 `Room` 메모리다. PostgreSQL에는 기존 점수와 패스포트 결과 요약을 저장한다. 이번 게임 기능은 새 DB 테이블을 요구하지 않는다. 같은 프로세스 안의 판정과 DB 저장, 브라우저 표시를 하나의 원자적 트랜잭션으로 표현하지 않는다.
+
+## 3. 연결·상태·명령 계약
 
 ```mermaid
 sequenceDiagram
@@ -11,190 +40,201 @@ sequenceDiagram
     participant Room as Room / Game Loop
     participant DB as PostgreSQL
     UI->>WS: 접속 / 좌석 복구 키
-    WS->>Room: join + 서버가 연결에 플레이어 바인딩
+    WS->>Room: 연결을 플레이어에 바인딩
     Room-->>UI: welcome + 개인별 state
-    UI->>WS: action / vote / judge / chat
-    WS->>Room: 패킷 크기·속도·현재 소켓 검사
-    Room->>Room: 페이즈·마감·생존·직업·대상 검사
+    UI->>WS: 의도 + 현재 phase_id
+    WS->>Room: 현재 소켓·형식·단계 확인
+    Room->>Room: 생존·역할·대상·마감·중복 검사
     Room-->>UI: 개인별 snapshot 또는 error
-    Room->>Room: 1초 ticker / 마감 시 밤·투표 정산
-    Room-->>UI: 새 페이즈와 서버 deadline
-    Room->>DB: 종료 시 로그인 유저 점수·사건 기록
+    Room->>Room: ticker 마감 정산 / 새 phase_id
+    Room-->>UI: 새 단계·deadline·공개 가능한 기록
+    Room->>DB: 종료 시 로그인 유저 결과 요약
 ```
 
-1. `frontend/lib/ws.ts`가 같은 origin의 `/api/ws`에 연결한다. 20초 ping, 500ms부터 최대 8초까지 jitter가 있는 재접속을 사용한다.
-2. `backend/app/routes/ws.py::game_socket`이 연결을 좌석에 바인딩한다. 새 연결이 기존 좌석을 복구하면 이전 소켓을 교체한다. 이전 연결의 종료 처리로 새 좌석을 끊지 않는다.
-3. `backend/app/game.py::Room`이 유일한 실시간 게임 권위다. 클라이언트는 결과나 직업을 쓰지 않고 의도만 보낸다. 잘못된 페이즈·사망자·잘못된 대상·마감 이후 결정은 서버가 거부한다. action/vote/judge에는 매 단계 새로 생성되는 phase_id가 필수이며, 오래된 요청에는 최신 개인 상태를 다시 보낸다.
-4. `_ticker → _advance → _resolve_*`가 정산한다. 브라우저의 카운트다운은 server_now + performance.now() 경과 시간을 사용하며 서버 deadline이 실제 마감이다.
-5. `_state_for(viewer)`가 직업·마피아 동료·탐정 결과·봉인 투표를 수신자별로 필터링한다. 비밀을 전체 방에 보낸 뒤 CSS로 숨기지 않는다.
-6. `models.py`, `routes/leaderboard.py`, `services/passport.py`가 종료 점수와 수사관 진행 기록을 저장한다. 진행 중 방과 채팅은 메모리 상태이며 DB에 실시간 저장하지 않는다.
+- 클라이언트는 같은 origin의 `/api/ws`를 사용한다. 재접속에는 지연과 jitter가 있으며, 좌석 복구 뒤 새 소켓이 제어권을 갖는다. 이전 소켓의 종료가 새 연결의 좌석을 끊어서는 안 된다.
+- `action`, `vote`, `judge`, `challenge`, `challenge_reply`는 **현재 개인 state에서 받은 `phase_id`**가 필수다. 누락·지난 단계 값은 `stale_phase` 오류와 최신 개인 상태를 반환한다. 클라이언트가 보낸 actor/role/권한은 신뢰하지 않는다.
+- 실제 마감은 서버 `deadline`이다. 표시 시간은 `server_now`와 브라우저 monotonic 경과 시간으로 보정한다. 모든 state가 1초마다 새로 수신된다고 가정하지 않는다. 변하지 않은 snapshot은 전송 최적화로 생략될 수 있다.
+- 질문·답변의 성공은 수신한 `cross_examinations`에 실제 기록이 있는지로 확인한다. 연결 끊김·응답 지연은 결과 미확정일 수 있다. 로컬 대기 타이머 만료만으로 서버가 거부했거나 취소됐다고 말하지 않는다.
+- 현재 빈도 제한은 일부 과도한 요청을 처리하지 않을 수 있다. 모든 명령에 별도 durable request ID/ACK를 도입한 프로토콜은 아니다. UI 잠금이 서버 멱등성을 대신하지 않는다.
 
-## 2. 현재 FSM과 판정 규칙
+## 4. FSM과 기존 정산 의미
 
 ```text
 lobby → reveal → night → dawn → day → vote
-                                    vote → defense → verdict → result → night
-                                    vote 동률/표 없음 → result
-밤·판결 정산 후 승리 조건 충족 → gameover → rematch → lobby
+                         ↑                ├─ 피고 없음 → 다음 night
+                         │                └─ 피고 있음 → defense → verdict → result
+                         └─────────────────────────────────────────────┘
+각 정산에서 승리 조건 충족 → gameover
 ```
 
-| 결정 | 현재 서버 규칙 / 근거 |
+| 단계/규칙 | 서버 의미 |
 | --- | --- |
-| 밤 행동 | `act`: 마피아·의사·탐정·경호원만 가능. 마피아 동료 공격, 탐정·경호원의 자기 선택 금지 |
-| 밤 정산 | `_resolve_night`: 마피아 표 최다 대상 → 의사 보호 확인 → 경호원이 대신 사망 → 일반 사망. 탐정 결과는 본인에게 전달 |
-| 여러 공격·치료 | 현재 마피아 동률은 수집 순서에 영향을 받는다. 의사가 여러 명이면 마지막 치료 대상 하나를 사용한다. 다중 직업 확장 전에 명시적 규칙 필요 |
-| 시민 투표 | `vote`: 생존 타인만 선택. 최다 득표가 단독일 때만 최후 변론 진행; 동률·표 없음은 처형 없이 종료 |
-| 기권 | `vote target="skip"`으로 명시적 기권 가능. 완료 인원에 포함하지만 피고 후보 득표에서는 제외. 마감까지 미제출도 기권 |
-| 최후 변론 | `add_chat`: 피고인만 공개 발언. 종료 후 처형 찬반 `judge`; 피고인은 판결 투표 불가 |
-| 판결 | `_resolve_verdict`: 제출된 찬성이 반대보다 많아야 처형. 동률은 석방; 미제출은 집계에서 제외 |
-| 승리 | `_check_win`: 마피아 0명은 시민 승리, 마피아가 나머지 생존자 이상이면 마피아 승리. 광대는 시민 처형 시 단독 승리 |
+| 밤 행동 | 역할·생존·유효 대상·마감 검사 후 해당 배우의 마지막 선택을 사용 |
+| 마피아 습격 | 최다 선택 대상, 동률은 기존 `Counter` 수집 순서의 첫 대상 의미를 유지 |
+| 치료 | 기존 다중 의사 구현의 마지막 치료 대상 의미를 유지; 새 우선순위를 만들지 않음 |
+| 경호 | 해당 보호·희생 규칙을 정산하고 실제 사망자와 습격 대상을 구분 |
+| 투표 | 기권도 접수 수에는 포함하되 피고 후보 계산에서 제외 |
+| 판결 | `judge`로 처형/석방 의도를 보내며 현재 페이즈와 마감을 다시 검사 |
+| 승리/종료 | 기존 진영 승리 조건을 적용; `_finish`는 같은 Room에서 중복 호출 시 재처리하지 않음 |
 
-전체 선택이 완료되어도 최소 숙고 시간이 지나야 조기 전환한다. `first`, `quick`, `classic` 속도별 타이머는 `PACE_SECONDS`와 `EARLY_ADVANCE_MINIMUM`에서 관리한다. 결정 교체는 마감 전까지 허용하고, 재접속 후 서버 snapshot으로 HUD를 복구한다.
+브라우저의 진행 연출은 페이즈 전환을 안내할 뿐 서버 시계를 늦추거나 판정을 바꾸지 않는다. 일반 실행의 `PACE_SECONDS`와 빠른 E2E fixture의 시간은 별개다. 테스트용 짧은 시계로 실제 초보자 진행 속도가 검증됐다고 해석하지 않는다.
 
-## 3. Node.js / Socket.IO 엔진 참고 코드
+## 5. 확정 밤 원장과 안전한 사건 보고
 
-아래는 보호 → 공격 우선순위, 페이즈 세대 검증, 동률·기권·변론 흐름을 담은 작은 예제다. 실제 서버의 경호원·탐정·광대·승리 조건·지속 저장은 생략했다. 이 예제의 공격 동률은 공격 없음으로 처리하므로 현재 Python 엔진과 규칙이 다르다.
+`_record_night()`는 교체 가능한 클릭 때가 아니라 `_resolve_night()`의 최종 정산에서 기록을 만든다. `night_records`는 최대 32개를 보관한다.
 
-```ts
-type Phase = "night" | "day" | "vote" | "defense" | "verdict";
-type Seat = { id: string; role: "citizen" | "doctor" | "mafia"; alive: boolean };
-type Command = { epoch: number; target?: string | null; execute?: boolean };
-const seconds: Record<Phase, number> = { night: 70, day: 180, vote: 75, defense: 60, verdict: 55 };
-function uniqueLeader(ids: string[]) {
-  const counts = new Map<string, number>();
-  ids.forEach(id => counts.set(id, (counts.get(id) ?? 0) + 1));
-  const sorted = [...counts].sort((a, b) => b[1] - a[1]);
-  return sorted[0] && (!sorted[1] || sorted[0][1] > sorted[1][1]) ? sorted[0][0] : null;
-}
-class Engine {
-  phase: Phase = "night"; epoch = 1; accused: string | null = null;
-  deadline = performance.now() + seconds.night * 1000;
-  actions = new Map<string, string>(); votes = new Map<string, string | null>();
-  verdicts = new Map<string, boolean>();
-  constructor(public seats: Map<string, Seat>) {}
-  enter(phase: Phase) {
-    this.phase = phase; this.epoch++; this.deadline = performance.now() + seconds[phase] * 1000;
-  }
-  accept(id: string, kind: "action" | "vote" | "judge", cmd: Command) {
-    const actor = this.seats.get(id), target = cmd.target ? this.seats.get(cmd.target) : undefined;
-    if (!actor?.alive || cmd.epoch !== this.epoch || performance.now() >= this.deadline) return false;
-    if (kind === "action" && this.phase === "night") {
-      if (!target?.alive || !["doctor", "mafia"].includes(actor.role)) return false;
-      if (actor.role === "mafia" && target.role === "mafia") return false;
-      this.actions.set(id, target.id); return true;
-    }
-    if (kind === "vote" && this.phase === "vote") {
-      if (cmd.target !== null && (!target?.alive || target.id === id)) return false;
-      this.votes.set(id, target?.id ?? null); return true; // null = 명시적 Skip
-    }
-    if (kind === "judge" && this.phase === "verdict" && id !== this.accused && typeof cmd.execute === "boolean") {
-      this.verdicts.set(id, cmd.execute); return true;
-    }
-    return false;
-  }
-  advance() {
-    if (performance.now() < this.deadline) return;
-    if (this.phase === "night") {
-      const protectedIds = new Set<string>(), attacks: string[] = [];
-      for (const [id, target] of this.actions) {
-        const actor = this.seats.get(id);
-        if (!actor?.alive || !this.seats.get(target)?.alive) continue;
-        if (actor.role === "doctor") protectedIds.add(target);
-        if (actor.role === "mafia") attacks.push(target);
-      }
-      const victim = uniqueLeader(attacks);
-      if (victim && !protectedIds.has(victim)) this.seats.get(victim)!.alive = false;
-      this.actions.clear(); this.enter("day");
-    } else if (this.phase === "day") {
-      this.votes.clear(); this.enter("vote");
-    } else if (this.phase === "vote") {
-      this.accused = uniqueLeader([...this.votes.values()].filter((id): id is string => id !== null));
-      this.enter(this.accused ? "defense" : "night");
-    } else if (this.phase === "defense") {
-      this.verdicts.clear(); this.enter("verdict");
-    } else {
-      const yes = [...this.verdicts.values()].filter(Boolean).length;
-      if (this.accused && yes > this.verdicts.size - yes) this.seats.get(this.accused)!.alive = false;
-      this.accused = null; this.enter("night");
-    }
-  }
-}
-```
+서버 전용 원장에는 아래가 들어간다.
 
-Socket.IO 바인딩은 인증 미들웨어에서 얻은 좌석 ID를 사용한다. 클라이언트가 보낸 actor/role을 신뢰하지 않는다. 다음 예제는 `authorizedRoom`, `parseCommand`, `rateLimit`, `publishPrivateViews`를 서비스 계층에서 제공한다는 전제다.
+- `id`, `round`, `outcome`, `title`, `detail`
+- 최종 선택 `actions[]`: `{actor_id, actor, role, target_id, target, kind}`
+- 실제 사망자 `victim_id`, `victim`과 비공개 판정용 `attacker_ids`
+
+`kind`는 `attack | heal | investigate | guard`, `outcome`은 `quiet | attack | rescue | guard`다. 선택 목록은 각 역할의 마지막 선택을 보존한다. 여러 선택 모두가 효과를 발휘했다는 의미는 아니며, 실제 효과는 별도 정산 결과로 읽어야 한다.
+
+일반 snapshot에는 아래 공개 projection만 보낸다.
 
 ```ts
-io.on("connection", socket => {
-  const engine = authorizedRoom(socket.data.session); // 인증 + 방 멤버십 검증
-  socket.on("command", (raw, ack) => {
-    const cmd = parseCommand(raw); // 엄격한 enum·길이·타입 검증
-    if (!cmd || !rateLimit(socket.id)) return ack?.({ ok: false });
-    const ok = engine.accept(socket.data.session.seatId, cmd.kind, cmd);
-    ack?.({ ok, epoch: engine.epoch });
-    if (ok) publishPrivateViews(engine); // 연결별 허용된 DTO만 emit
-  });
-});
+type NightSummary = {
+  id: string; round: number;
+  outcome: "quiet" | "attack" | "rescue" | "guard";
+  title: string; detail: string;
+} | null;
 ```
 
-방 하나의 명령과 tick은 하나의 직렬 실행 경로에서 처리한다. 비동기 DB 호출을 엔진 상태 변경 사이에 끼우지 않는다. 실서비스에는 command ID 기반 중복 제거·ack·재접속 snapshot·방 종료 시 timer 해제가 필요하다. Socket.IO는 기본적으로 끊긴 동안의 이벤트를 자동 영속화하지 않는다. [공식 전달 보장](https://socket.io/docs/v4/delivery-guarantees/), [서버 API](https://socket.io/docs/v4/server-api/).
+`night_summary`는 **이번 라운드**의 정산 기록이며 `lobby/reveal/night`에는 `null`이다. 새 밤에 이전 밤의 보고를 현재 결과처럼 보여 주지 않는다. 공개된 사망·구조 결과를 넘어서 행동자의 신원·역할·치료/조사 대상·살아남은 습격 대상을 노출하지 않는다. 아무도 사망하지 않은 아침에도 안정적인 ID가 있어 질문의 근거로 인용할 수 있다.
 
-## 4. 모듈식 직업 확장안
+`night_replay`는 종료 전 `[]`, `gameover`에서만 전체 원장을 공개한다. 공개 객체는 위 원장 중 `attacker_ids`를 제외한다. 정산된 선택과 공개 역할로 복기하는 **결과 화면**이지 경기 도중의 전지적 관전이나 URL로 다시 재생하는 영구 리플레이가 아니다. 서버 재시작·방 정리 뒤 원장은 복구되지 않는다.
 
-현재 Python은 `ROLE_NAMES`, `act`, `_resolve_night`, `_check_win`, `_state_for`에 직업 분기가 있다. 새 직업을 등록만으로 추가할 수 있는 구조는 후속 설계이며, 아래 계약으로 분리할 수 있다.
+### 초기 개인 제보는 확정 증거가 아니다
 
-```ts
-interface RoleModule {
-  id: string;
-  faction: "citizen" | "mafia" | "neutral";
-  priority: number; // 예: 방해 10 → 보호 20 → 공격 30 → 조사 40
-  validate(ctx: Readonly<ActionContext>, target: string): string | null;
-  resolve(ctx: Readonly<NightContext>, target: string): Effect[];
-  privateView(ctx: Readonly<ViewerContext>): PrivateRoleView;
-  wins(ctx: Readonly<EndContext>): boolean;
-}
-```
+시작 때 생성하는 개인 packet은 첫 실제 밤 행동보다 앞선 **미확인 개인 제보**다. 무작위 서술·후보를 실제 관찰 사실이나 시민의 이동 기록으로 주장하지 않는다. 공개하더라도 검증된 밤 원장·감식 결과와 구분한다. 위조 제보는 같은 형식을 사용하며, 출처와 미확인 상태를 사용자에게 남긴다.
 
-모듈은 전체 Room을 직접 변경하지 않고 `protect`, `kill`, `redirect`, `privateIntel` 같은 Effect를 반환한다. 엔진이 우선순위와 안정적인 ID 순으로 정산하고 결과 DTO를 생성한다. 정치인·영매·청소부·스파이·연쇄살인마·광인·테러리스트는 아직 실제 플레이 직업이 아니다. 각 직업마다 대상 검증, 사망 시 행동 취소 여부, 능력 충돌, 승리 조건, 비밀 노출 테스트와 밸런스 검증이 필요하므로 ‘5분 안에 완성’은 보장하지 않는다.
+## 6. 타임라인: 정산 단계와 같은 밤의 연결
 
-## 5. React HUD와 시각·사운드 구성
+타임라인의 가시적인 순서는 다음이다.
 
 ```text
-GameRoom [현재 app/page.tsx / CSS phase-*]
-├─ PhaseHeader       단계 이름 · 남은 시간 · 연결 상태
-├─ RoomStage         느와르 배경 · 플레이어 · 투표/밤 행동 대상
-├─ CasePanel         사건 기록 · 공개 단서 · 수사 메모
-├─ ChatPanel         허용 채널 · 읽지 않은 대화 · 입력 상태
-├─ RolePanel         내 비공개 직업 · 능력 · 개인 조사 결과
-├─ AfterlifePanel    사후 예측 · 허용된 사후 메시지
-└─ ActionDock        한 단계의 핵심 행동 · 선택 확인 · 모바일 안전 영역
+능력 선택 → 행동 마감 → 실제 정산 결과 → 개인 결과 전달 → 사건 기록 공개
 ```
 
-기존 구현의 패널을 설명하는 구조이며 모든 항목이 별도 파일로 추출된 컴포넌트는 아니다. 모바일은 사건·수사·대화·내 정보 탭으로 분리하고 데스크톱은 테이블과 대화의 동시 열람을 우선한다. 주 행동은 한 번에 하나, 선택 대상과 전송 상태는 따로 표시한다. 버튼은 44px 이상, 긴 한국어는 `keep-all`과 `min-width: 0`, focus-visible과 live 상태 안내를 유지한다.
+`밤 · 01` 같은 표기는 서사적 단계 표식이다. 실제 이동 시각이나 시공간 알리바이가 아니다. 동일 텍스트에 보이지 않는 무작위 정답 순서를 붙이지 않는다. 모든 참가자에게 이번 밤 결과 anchor를 제공하고 다른 조각을 더 배분한다. 정답 전체는 경기 종료 전 추리 안내문으로 미리 내보내지 않는다.
 
-밤은 청회색, 낮은 따뜻한 회색, 투표는 절제된 적색을 사용한다. 단계 색만으로 의미를 전달하지 않고 이름·아이콘·가이드를 함께 표시한다. 배경 효과는 텍스트 위를 가리지 않고 `prefers-reduced-motion`과 문서 visibility를 따른다. 저사양 모바일에서 지속적인 전체 화면 blur와 고해상도 canvas는 피한다.
+추리 봉인 `theory`의 새 기록은 다음을 구분해 채점한다.
 
-`page.tsx`의 Web Audio 효과음과 브라우저 음성 아나운서는 사용자 조작 후 재생하며 설정에서 독립적으로 끌 수 있다. 현재는 페이즈 전환 큐와 마감 직전 경고음을 하나의 AudioContext에서 합성한다. 밤의 지속 저음 드론과 심박 BGM을 추가할 때는 별도 gain/음량 설정과 음성 참여 중 ducking을 적용하는 설계를 권장한다. 지속 BGM과 별도 BGM 음량은 이번 구현에 포함하지 않는다. phase당 하나의 전환 큐만 재생하고 oscillator·timer·gain을 정리한다. 실제 음악 파일을 추가할 때는 이용권한 확인이 필요하다.
+1. 지목한 사람이 인용한 밤의 실제 습격 행동자와 맞는가.
+2. 선택한 공개 감식 단서의 후보 범위와 지목이 맞는가.
+3. 본인이 소유한 조각과 감식 단서가 같은 확정 밤 `event_id`에 속하는가.
 
-## 6. 관전·치팅 방지와 운영 한계
+마지막 조건은 **같은 밤의 기록 연결**이지 여러 물리적 시간·출입 경로를 풀어야만 가능한 인과 퍼즐이 아니다. 특정 공격 조각을 운 좋게 받아야만 제출할 수 있는 추첨으로 만들지 않는다. 반대로 과거 밤의 단서와 새 밤의 조각을 섞은 제출은 거부하며 stake를 소모하지 않는다. 대응 가능한 단서가 없으면 `me.can_theorize`는 거짓이다. 조용한 다음 아침에는 현재 사건 보고를 인용해 토론할 수 있다.
 
-현재 사망자에게는 사후 예측, 제한된 유령 메시지와 유령 전용 비밀 대화가 있다. 전체 직업 공개는 `gameover`에서만 한다. 유령 채널은 사망/관전자 자격·길이·속도를 서버에서 검사하고 생존자에게 보내지 않는다. 경쟁 모드의 사망자에게 모든 생존자의 정체를 실시간 공개하면 외부 전달이 쉬워진다. 전원 동의한 캐주얼 전지적 관전 또는 게임 종료 후 역할 리플레이로 제한하는 것이 안전하다.
+봉인 시점의 비공개 event/대상/단서 평가를 고정하고 공개 `theory_board` projection에서는 이를 제거한다. 이 변경 전 event ID 없는 legacy fixture/API 해석은 호환 분기로 남지만 새 경기의 원장은 event 연결을 사용한다.
 
-Discord·대면 대화·화면 공유의 정보 유출은 웹 서버가 기술적으로 차단할 수 없다. 익명 매칭, 종료 전 직업 비공개, 관전 지연, 신고·차단·운영 정책은 피해를 줄이는 수단이다. 금지어만으로 스포일러가 완전히 제거되었다고 표시하지 않는다.
+## 7. 증언 대조실 계약
 
-현재 음성은 `frontend/lib/voice.ts`의 WebRTC P2P이며 WebSocket은 SDP/ICE를 중계한다. STUN만 설정되어 있어 일부 NAT·사내망에서 실패할 수 있다. TURN relay·단기 자격증명·SFU는 현재 제공하지 않는다. 마이크 비활성화는 UI 정책이며 변조 클라이언트까지 강제할 수 없으므로 경쟁전의 강제 발언 권한은 서버가 미디어를 중계하는 SFU가 필요하다.
+요청은 연결된 좌석의 권한으로 처리한다. 임의 `target_id`로 질문 대상을 바꿀 수 없다.
 
-## 7. 성능과 확장 경계
+```ts
+type Challenge = {
+  t: "challenge"; phase_id: string;
+  claim_id: string; clue_id: string; text: string;
+};
+type ChallengeReply = {
+  t: "challenge_reply"; phase_id: string;
+  challenge_id: string; text: string; kind: "clarify" | "revise";
+};
+```
 
-현재 일반 명령은 120ms, 채팅은 450ms 간격으로 제한하고 패킷은 8,192자로 제한한다. 채팅·이벤트는 유한 `deque`, 송신은 개인 snapshot 캐시·동일 payload 생략·broadcast lock·느린 소켓 timeout을 사용한다. 메시지를 debounce로 합쳐 삭제하지 않고, 화면 렌더링과 입력 중 표시만 프레임 단위로 합친다.
+| 검사 | 규칙 |
+| --- | --- |
+| 질문자 | 현재 낮, 살아 있는 비관전자, 서버 마감 전 |
+| 진술 | 이번 라운드의 실제 공식 진술 ID; 작성자는 살아 있는 다른 참가자 |
+| 근거 | 실제 공개 감식 단서 ID 또는 현재 보이는 `night_summary.id`; 비공개 제보/조각 ID는 거부 |
+| 질문 | 공백 정규화 후 최소 5자·최대 160자; 초과분은 서버가 절단 |
+| 빈도 | 참가자당 라운드 한 번; 같은 진술·근거·정규화 문장의 재요청은 중복 생성 없이 성공 |
+| 답변자 | 해당 질문 대상자만, 같은 낮·라운드·마감 안에서 처리 |
+| 답변 | `clarify` 또는 `revise`, 최소 5자·최대 200자; 한 번만 기록, 정확히 같은 재전송은 중복 생성 안 함 |
 
-방은 프로세스 메모리에 있기 때문에 재시작 시 진행 게임이 사라진다. 동일 방의 연결이 서로 다른 API 인스턴스로 분산되면 상태가 분리된다. 수평 확장 전에는 room owner routing과 단일 방 writer, 영속 snapshot/event log, 복구 epoch를 도입해야 한다. 단순히 Redis pub/sub를 붙이는 것만으로 게임 정합성이 생기지 않는다.
+다른 내용으로 두 번째 질문/답변을 보내면 거부한다. 단계가 지난 뒤의 같은 요청은 `phase_id`부터 거부된다. 이 멱등성은 Room 메모리에 대한 것이며 장애 뒤의 영구 중복 제거 보장이 아니다.
 
-검증 근거는 `backend/tests/test_game_flow.py`, `test_ws.py`, `test_theory.py`와 실제 브라우저 플레이 흐름이다. 부하 수용량과 턴 지연 보장은 실제 동시 연결·채팅·느린 클라이언트 부하 시험 후에 수치로 제시한다.
+`cross_examinations`는 최대 48개를 보관한다. 각 공개 항목은 아래와 같다.
 
-## 이번 개선의 실제 추가 프로토콜
+```ts
+type CrossExamination = {
+  id: string; round: number;
+  asker_id: string; asker: string; target_id: string; target: string;
+  claim_id: string; claim_text: string;
+  clue_id: string; clue_title: string; clue_detail: string;
+  question: string; response: string | null;
+  response_kind: "clarify" | "revise" | null;
+  at: number; responded_at: number | null;
+};
+```
 
-- `join_only=true`: 기존 방만 조회, 없으면 HTTP101 후 close4007. 새 방 생성은 기본 연결을 사용한다.
-- `phase_id` / `server_now`: 매 페이즈 토큰과 서버 시각. action/vote/judge는 현재 토큰을 반드시 포함한다.
-- `vote target="skip"`: 완료 인원에 포함하는 기권. 다른 후보만 비교하고 동률이면 피고가 없다.
-- `ghost_chat`: 사망자/관전자만 쓰고 읽는 대화. 160자·0.45초 제한·최대80개, 재경기 초기화. 생존자/생존 마피아에게 전송되지 않는다.
-- `voice_scope`: 페이즈·연결 세대와 채널을 결합한다. 서버의 개인별 허용 참가자와 함께 확인하고 바뀌면 기존 WebRTC peer/미디어/ICE 큐를 종료한다.
+인용한 진술·근거의 텍스트 snapshot을 보관해 나중에 원본을 다르게 읽는 문제를 줄인다. `_candidate_ids` 같은 서버 판정 자료는 공개 DTO에서 제거한다. `me.can_challenge`는 현재 단계·생존·근거·이미 사용했는지에 대한 힌트이며 적절한 다른 진술이 없으면 UI는 선택할 수 없는 이유를 표시해야 한다. 최종 권한은 명령 처리 시 다시 검사한다.
+
+## 8. 봇 지식과 판단의 한계
+
+봇은 자유 대화의 의미를 이해하는 생성형 모델이 아니다. 성향·규칙·공개 기록·정당한 개인 지식으로 템플릿 답변과 점수를 만든다.
+
+- 일반 시민 봇은 상대의 숨은 역할이나 **다른 탐정의 비공개 결과/의심 값**을 읽지 않는다.
+- 탐정은 자신이 실제로 조사한 결과만 개인 판단에 사용한다. 마피아는 게임 규칙상 허용된 자기 팀 정보를 사용한다.
+- 공개 감식 범위와 자신의 기존 의심을 대조할 수 있으며, 인용한 새 공개 근거가 기존 지목을 제외하면 판단을 수정할 수 있다.
+- 질문 횟수나 해명 유무만으로 유죄·불신을 올리지 않는다. 공개 근거의 후보 범위에 실제로 포함된 경우에만 해당 근거에 따른 판단을 더할 수 있다.
+- 과거 기억을 말할 때 실제 기록된 사건을 인용한다. 문장에 근거가 없는데 “알리바이가 바뀌었다”거나 “모순이 확정됐다”고 선언하지 않는다.
+- 질문과 답변은 공식 판정 결과가 아니다. 봇의 수정 역시 자유 문장의 사실 검증·최적 전략·사람 수준 추론을 보증하지 않는다.
+
+AI 관계/기억은 해당 경기의 메모리다. 게임 간 장기 기억·학습은 없다. 비밀 계약의 자유 문구가 자동 집행되거나 실제 배신을 의미 분석으로 판별하지 않는다. `best_persuader` 필드는 이전 클라이언트 호환을 위해 유지하되 화면 의미는 **사건 기록 기여자: 공식 진술 개수**다. 사용자가 투표한 설득력 상이나 검증된 대화 품질 지표가 아니다.
+
+## 9. 전체 snapshot의 공개 범위와 음성
+
+`_state_for(viewer)`는 단순 화면 숨김이 아니라 수신자별 데이터를 생성한다. 개인 탐정 결과, 마피아 팀, 비공개 제보, 봉인 압박 지목과 계약은 다른 참가자의 부수 배열에서도 새어 나가지 않아야 한다.
+
+- 비밀 계약 관련 `moments`는 계약 당사자에게만 전달한다.
+- 봉인 중인 압박 순간의 target은 소유자 이외에게 제거한다.
+- AI 메모리는 해당 뷰어에게 허용된 관계/관찰만 projection한다.
+- 실제 역할과 밤 행동은 종료 전 전체 공개하지 않는다. 사망자도 살아 있는 사람의 비밀 역할을 보는 전지적 관전자가 아니다.
+- 사망자·관전자는 유령 채널에서 대화한다. 생존자의 대화/음성 허용 범위와 분리한다.
+
+WebRTC는 P2P다. 서버가 현재 `voice_scope`와 허용 peer를 검사하고 클라이언트는 단계 변경 때 peer·수신 미디어·ICE 큐를 정리한다. 그러나 서버가 이미 직접 연결된 악성 클라이언트의 미디어 송출을 강제로 차단하는 SFU는 아니다. TURN이 구성되지 않으면 일부 NAT·사내/모바일 네트워크에서 연결이 실패할 수 있다. 실제 마이크 송수신·다양한 네트워크 호환은 별도 검증 대상이다.
+
+## 10. 데이터 무결성·운영·규모
+
+같은 `Room`에서 `_finish` 재호출을 막아 중복 결과 처리를 줄인다. 이것을 DB 커밋·외부 부수 효과·프로세스 재시작을 아우르는 exactly-once 처리로 부르지 않는다. 로그인 완료 기록은 기존 패스포트 경로로 저장되며 익명 경기나 미완주 세션은 영구 진행 기록과 구분한다.
+
+메모리 버퍼 상한은 무제한 로그 누적을 줄이지만 부하 검증을 대신하지 않는다. 현재 방 상태는 프로세스 소유다. 수평 확장에는 방 배치·단일 writer·연결 affinity·장애 복구 snapshot과 재처리 경계를 먼저 설계해야 하며 Redis 설치만으로 해결되지 않는다. 배포·프로세스 재시작 시 진행 중 경기가 사라질 수 있다.
+
+**4만 명 가입/누적 사용자와 4만 동시 접속은 다르다.** 현재 변경은 어느 쪽의 운영 수용량, 유지율, 수익성도 입증하지 않는다. 단일 머신 테스트와 E2E fixture는 실제 운영 부하·사람의 재미·재방문 지표가 아니다.
+
+## 11. 검증 레이어와 안전한 fixture
+
+| 레이어 | 확인할 것 | 대체하지 않는 증거 |
+| --- | --- | --- |
+| 순수 도메인/WS 검사 | 권한·단계·중복·밤 기록·봇 지식 불변성·전체 snapshot 비밀 범위 | 실제 DB 커밋·브라우저 배치 |
+| PostgreSQL 통합 검사 | 실제 저장·패스포트 집계·제약·롤백/조회 | 운영 DB 성능·장애 복구 |
+| 정적 빌드·타입·lint | 의존성·컴파일·타입·규칙 | 실제 CTA/서버 접수·시각 품질 |
+| Playwright E2E | 브라우저→정적 export proxy→실제 로컬 API/DB→개인 state/화면 | 일반 시계의 전체 판 사용자 연구·운영 배포 |
+| 운영 URL 확인 | 배포된 코드의 진입·주요 흐름·오류·반응형 | 장기 안정성·대규모 수용량·재미 |
+
+### DB 검사는 폐기 가능한 전용 DB에서만
+
+`backend/tests/conftest.py`는 명시적인 `TEST_DATABASE_URL`이 없으면 DB 의존 검사를 skip한다. skip은 전체 통합 검사의 통과가 아니다. 설정하면 앱 import 전에 `DATABASE_URL`을 같은 값으로 지정해 앱과 fixture 세션이 다른 DB를 바라보지 않게 한다.
+
+fixture는 `scores/users`와 연결된 결과를 `TRUNCATE ... CASCADE`로 초기화한다. **운영 DB나 공유 개발 DB를 지정하면 안 된다.** 별도 폐기 가능 DB를 생성·마이그레이션한 뒤 검사한다. 테스트 사이 리더보드 캐시를 초기화하고 테스트/app 엔진을 dispose한다. 실제 비밀번호나 접속값은 문서·로그에 남기지 않는다. 실행 예시는 README의 환경 변수 placeholder를 사용한다.
+
+### 빠른 브라우저 진행은 명시적인 테스트 프로세스만
+
+`backend/tests/browser_server.py`는 `BLACK_MIDNIGHT_BROWSER_TEST=1`과 폐기 가능한 `DATABASE_URL`이 있을 때만 실행한다. `first-e2e-*` 방의 시작 seed와 `first` 모드의 짧은 단계/조기 진행 시간을 테스트 프로세스 안에서만 적용한다. 일반 `app.main` 실행의 실제 시계·규칙을 수정하는 환경 설정이 아니다. backend Docker build context는 `tests`를 제외하므로 이 runner가 운영 이미지에 포함되지 않는다.
+
+프런트의 `pnpm test:e2e`는 Playwright로 정적 export를 제공하는 `tests/serve-export.mjs`를 이용한다. 기본 주소 `127.0.0.1:3100`에서 로컬 API/WebSocket `127.0.0.1:8000`으로 연결한다. 먼저 별도 터미널에서 테스트용 백엔드를 띄우고 프런트 export를 빌드해야 한다. `BROWSER_BASE_URL` override는 다른 대상에 테스트 변경을 보낼 수 있으므로 운영 URL에 무심코 사용하지 않는다.
+
+### UI 수용 기준
+
+Pretendard Variable v1.3.9를 `frontend/public/fonts/PretendardVariable.woff2`로 제공하고 SIL OFL 1.1 고지를 같은 폴더에 보관한다. 폰트 CDN에 의존하지 않는다. 본문·상태·간격의 최종 선택은 design.md와 실제 화면 비교에 따른다.
+
+`360×800`, `390×844`, `768×1024`, `1440×900`에서 실제 스크린샷과 조작을 확인한다. 가로 넘침·중첩·한글 한 글자 줄바꿈뿐 아니라 진술/근거의 읽기 순서, 스크롤 가능한 조사/투표, 44px 수준 터치 영역, Tab/Shift+Tab/Enter/Space/Escape와 포커스, 정상/빈 결과/오류/전송 중/결과 미확정/접수 완료, 라이트·다크 선호와 reduced-motion을 변경 범위에 맞게 확인한다. 테마를 지원하지 않는 범위도 명시한다. 자동 overflow 검사 하나나 빌드 결과만으로 이 기준 전체를 통과했다고 보고하지 않는다.
+
+## 12. 배포와 복구의 별도 게이트
+
+허용된 배포는 `boclair98/mafia-game`에 검증한 커밋을 push한 뒤 실제 fork `coders-kr/mafia-game`의 동일 기본 브랜치를 동기화하고 **전체 SHA 일치**를 확인한다. 최신 Coders.kr 문서를 읽고 기존 `black-midnight` 프로젝트를 canonical upstream에서 배포한다. terminal 상태가 `ready`여도 운영 URL의 기능·시각 확인이 남는다.
+
+같은 프로젝트의 이전 배포를 보존하는 것은 가능해도 프로세스 메모리 경기를 복구하는 것과 다르다. 배포 때 진행 중 방에 미치는 영향을 알리고, 테스트/빌드/배포/운영 검증 중 실패한 단계를 구분한다. 미확인 운영 여정이나 실사용자의 재미를 완료로 선언하지 않는다.

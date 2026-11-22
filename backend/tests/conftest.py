@@ -10,10 +10,9 @@ Wires up:
 
 Each database-backed API test starts with truncated tables. Pure game-flow
 and WebSocket tests do not boot PostgreSQL. The fixture connects to whatever
-Postgres `TEST_DATABASE_URL` points at — by default the same database
-the dev `docker compose up` brings up. If you'd rather isolate tests
-from your dev data, point TEST_DATABASE_URL at a separate DB before
-running pytest.
+Postgres `TEST_DATABASE_URL` explicitly points at. Database tests are skipped
+when it is absent. The target must be disposable: never set this to a live or
+shared development database. Application sessions use that same test target.
 """
 
 from __future__ import annotations
@@ -24,25 +23,33 @@ from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
-from app.core.database import Base
-from app.main import app
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-TEST_DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL",
-    "postgresql+asyncpg://app:app@localhost:5432/app",
-)
+# Database tests can truncate tables. Never silently point them at the default
+# development database, and bind application/persistence sessions to the same
+# explicit isolated target before importing the app's settings/engine.
+TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
+if TEST_DATABASE_URL:
+    os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+
+from app.core.database import Base  # noqa: E402
+from app.core.database import engine as application_engine  # noqa: E402
+from app.main import app  # noqa: E402
+from app.routes import leaderboard  # noqa: E402
 
 
 @pytest_asyncio.fixture(scope="session")
 async def _engine():
+    if not TEST_DATABASE_URL:
+        pytest.skip("Set TEST_DATABASE_URL to an isolated disposable PostgreSQL database")
     engine = create_async_engine(TEST_DATABASE_URL)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield engine
     await engine.dispose()
+    await application_engine.dispose()
 
 
 @pytest_asyncio.fixture
@@ -50,6 +57,7 @@ async def _truncate(_engine) -> AsyncIterator[None]:
     """Wipe tables for database-backed API tests only."""
     async with _engine.begin() as conn:
         await conn.execute(text("TRUNCATE TABLE scores, users RESTART IDENTITY CASCADE"))
+    leaderboard._leaderboard_cache = None
     yield
 
 

@@ -347,6 +347,11 @@ class Room:
         self.awards: list[dict[str, str | int]] = []
         self._bot_marks: set[str] = set()
         self._bot_suspicions: dict[str, str] = {}
+        # Private truth is kept here until gameover. Public state receives only
+        # the intentionally incomplete summary and independently scoped clues.
+        self.night_records: deque[dict[str, Any]] = deque(maxlen=32)
+        self.cross_examinations: deque[dict[str, Any]] = deque(maxlen=48)
+        self.detective_results: dict[str, dict[str, bool]] = {}
         self._task: asyncio.Task | None = None
         self._broadcast_lock = asyncio.Lock()
         self._last_broadcast_payloads: dict[str, str] = {}
@@ -374,12 +379,67 @@ class Room:
         """Deal private evidence fragments from the selected causal timeline."""
         active = [p for p in self.players.values() if p.role != "spectator"]
         fragments = self.case_solution.get("timeline") or SCENE_FRAGMENTS
-        self.scene_fragments = {
-            player.id: random.sample(fragments, min(3, len(fragments)))
-            for player in active
-        }
+        core = next((card for card in fragments if card.get("id") == "attack"), None)
+        self.scene_fragments = {}
+        for player in active:
+            # The shared outcome anchor is always available; a hypothesis must
+            # not be unwinnable merely because a player did not draw a card.
+            if core and core.get("event_id"):
+                others = [card for card in fragments if card is not core]
+                cards = [dict(core), *random.sample(others, min(2, len(others)))]
+                random.shuffle(cards)
+            else:
+                cards = random.sample(fragments, min(3, len(fragments)))
+            self.scene_fragments[player.id] = cards
         self.scene_submissions.clear()
         self.scene_results.clear()
+
+    def _current_night_record(self) -> dict[str, Any] | None:
+        return next((record for record in reversed(self.night_records) if record["round"] == self.round), None)
+
+    def _night_summary(self) -> dict[str, Any] | None:
+        record = self._current_night_record()
+        if not record or self.phase in {"lobby", "reveal", "night"}:
+            return None
+        return {key: record[key] for key in ("id", "round", "outcome", "title", "detail")}
+
+    def _record_night(self, outcome: str, detail: str, victim_id: str | None, attackers: list[str]) -> dict[str, Any]:
+        """Freeze the final resolution, not a player's replaceable click."""
+        titles = {"quiet": "확인된 습격이 없는 밤", "attack": "현장에 남은 습격", "rescue": "치료가 막아 낸 습격", "guard": "누군가를 지킨 마지막 행동"}
+        action_names = {"mafia": "attack", "doctor": "heal", "detective": "investigate", "bodyguard": "guard"}
+        actions = []
+        for actor_id, target_id in self.actions.items():
+            actor, target = self.players.get(actor_id), self.players.get(target_id)
+            if actor and target and actor.role in action_names:
+                actions.append({"actor_id": actor.id, "actor": actor.nick, "role": actor.role,
+                                "target_id": target.id, "target": target.nick, "kind": action_names[actor.role]})
+        victim = self.players.get(victim_id or "")
+        record = {"id": secrets.token_hex(6), "round": self.round, "outcome": outcome,
+                  "title": titles[outcome], "detail": detail, "actions": actions,
+                  "victim_id": victim.id if victim else None, "victim": victim.nick if victim else None,
+                  "attacker_ids": list(attackers)}
+        self.night_records.append(record)
+        # The order now follows the real resolver's readable stages. There is
+        # no invisible randomly selected ordering for identical evidence.
+        stages = [
+            ("approach", "밤 · 01", "능력 선택", "밤 행동 입력 단계가 끝났습니다. 각자의 참여 여부·선택 대상·직업은 공개되지 않습니다."),
+            ("blindspot", "밤 · 02", "행동 마감", "마감 시각에 마지막으로 확정된 선택만 이번 밤 정산에 사용했습니다."),
+            ("attack", "밤 · 03", titles[outcome], detail),
+            ("alibi", "밤 · 04", "개인 결과 전달", "탐정의 조사 여부와 결과는 비공개입니다. 공개 주장과 실제로 확인된 사실은 구분해야 합니다."),
+            ("lock", "새벽 · 05", "사건 기록 공개", "아침 보고가 공개됐습니다. 기록이 가리키는 후보와 각자의 진술을 대조하세요."),
+        ]
+        timeline = [{"id": ident, "time": when, "title": title, "detail": copy, "event_id": record["id"]}
+                    for ident, when, title, copy in stages]
+        order = [card["id"] for card in timeline]
+        self.case_solution = {"timeline": timeline, "order": order,
+                              "links": dict(zip(order, order[1:], strict=False)),
+                              "layout_id": "canonical", "chain_label": " → ".join(card["title"] for card in timeline)}
+        self._prepare_scene()
+        return record
+
+    @staticmethod
+    def _public_clue(clue: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in clue.items() if not key.startswith("_")}
 
     def _mission_completed(self, player: Player) -> bool:
         mission = player.mission
@@ -531,7 +591,7 @@ class Room:
             pid, count = persuasion.most_common(1)[0]
             player = self.players.get(pid)
             if player:
-                self.best_persuader = {"player_id": pid, "player": player.nick, "copy": f"공식 진술 {count}개로 테이블의 시선을 움직였습니다."}
+                self.best_persuader = {"player_id": pid, "player": player.nick, "copy": f"공식 진술 {count}개를 사건 기록에 남겼습니다."}
         culprit = next((p for p in playable if p.role == "mafia"), None)
         self.final_highlights = [
             {"kind": "case", "title": "사건의 핵심", "copy": self.case_profile.get("briefing", "")},
@@ -848,7 +908,7 @@ class Room:
             player.last_reaction_at = 0.0
         self.round = 1
         self.case_profile = random.choice(CASE_PROFILES)
-        layout = CASE_TIMELINE_LAYOUTS[0] if self.case_mode == "first" else random.choice(CASE_TIMELINE_LAYOUTS)
+        layout = CASE_TIMELINE_LAYOUTS[0]
         fragment_by_id = {fragment["id"]: fragment for fragment in CASE_TIMELINE}
         timeline = []
         for index, fragment_id in enumerate(layout["order"]):
@@ -884,6 +944,9 @@ class Room:
         self.tips.clear()
         self.tip_marks.clear()
         self.moments.clear()
+        self.night_records.clear()
+        self.cross_examinations.clear()
+        self.detective_results.clear()
         self.clues.clear()
         self.private_leads.clear()
         self.public_leads.clear()
@@ -957,6 +1020,9 @@ class Room:
         self.tips.clear()
         self.tip_marks.clear()
         self.moments.clear()
+        self.night_records.clear()
+        self.cross_examinations.clear()
+        self.detective_results.clear()
         self.clues.clear()
         self.private_leads.clear()
         self.public_leads.clear()
@@ -1119,6 +1185,82 @@ class Room:
         self._moment("claim", line, actor=pid)
         return None
 
+    def challenge_claim(self, pid: str, claim_id: str, clue_id: str, raw: str) -> str | None:
+        """Ask about two actual public records; never infer free-text truth."""
+        actor = self.players.get(pid)
+        if self.phase != "day" or not actor or not actor.alive or actor.role == "spectator" or self._decision_expired():
+            return "낮 토론 중인 생존자만 기록 대조 질문을 보낼 수 있습니다."
+        question = " ".join(raw.strip().split())[:160]
+        if len(question) < 5:
+            return "대조할 질문을 다섯 글자 이상 적어 주세요."
+        previous = next((item for item in self.cross_examinations if item["asker_id"] == pid and item["round"] == self.round), None)
+        if previous:
+            if previous["claim_id"] == claim_id and previous["clue_id"] == clue_id and previous["question"] == question:
+                return None
+            return "이번 낮의 기록 대조 질문은 이미 보냈습니다."
+        claim = next((item for item in self.claims if item["id"] == claim_id and item["round"] == self.round), None)
+        if not claim:
+            return "현재 낮에 공개된 공식 진술을 선택해 주세요."
+        target = self.players.get(str(claim["speaker_id"]))
+        if not target or not target.alive or target.id == pid or target.role == "spectator":
+            return "살아 있는 다른 참가자의 진술을 선택해 주세요."
+        clue = next((item for item in self.clues if item["id"] == clue_id), None)
+        if clue is None:
+            summary = self._night_summary()
+            clue = summary if summary and summary["id"] == clue_id else None
+        if not clue:
+            return "공개된 감식 단서나 이번 밤의 사건 보고를 선택해 주세요."
+        now_ms = int(time.time() * 1000)
+        entry = {"id": secrets.token_hex(6), "round": self.round,
+                 "asker_id": pid, "asker": actor.nick, "target_id": target.id, "target": target.nick,
+                 "claim_id": claim_id, "claim_text": str(claim["text"]),
+                 "clue_id": clue_id, "clue_title": str(clue["title"]), "clue_detail": str(clue["detail"]),
+                 "question": question, "response": None, "response_kind": None,
+                 "_candidate_ids": list(clue.get("suspect_ids", [])),
+                 "responded_at": None, "at": now_ms}
+        self.cross_examinations.append(entry)
+        self._record(f"기록 대조 — {actor.nick}님이 {target.nick}님의 진술과 {clue['title']}를 함께 제시했습니다.")
+        self._moment("challenge", "공개 진술에 근거를 제시한 질문이 도착했습니다.", actor=pid, target=target.id)
+        for observer in self.players.values():
+            if observer.is_bot and observer.alive and observer.id != target.id:
+                self._remember_ai(observer, f"{actor.nick}님의 기록 대조 질문을 확인함", target, "neutral")
+        if target.is_bot:
+            names = [self.players[item].nick for item in clue.get("suspect_ids", []) if item in self.players]
+            suspected_id = claim.get("suspect_id")
+            reconsider = bool(names and suspected_id and suspected_id not in clue.get("suspect_ids", []))
+            if names:
+                response = (f"새 단서의 후보는 {' · '.join(names)}입니다. 제가 지목했던 사람을 뒷받침하지 않으므로 그 의심은 낮추고 다시 검토하겠습니다."
+                            if reconsider else
+                            f"{clue['title']}는 {' · '.join(names)} 중 한 사람의 흔적입니다. 제 진술만으로 결론 내리지 말고 다른 기록도 함께 확인해 주세요.")
+            else:
+                response = f"{clue['title']}는 공개된 결과입니다. 제 판단은 확정 사실이 아니며, 이 기록을 반영해 다음 표를 다시 검토하겠습니다."
+            self.reply_challenge(target.id, str(entry["id"]), response, "revise" if reconsider else "clarify")
+            if reconsider and self._bot_suspicions.get(target.id) == suspected_id:
+                self._bot_suspicions.pop(target.id, None)
+        return None
+
+    def reply_challenge(self, pid: str, challenge_id: str, raw: str, kind: str) -> str | None:
+        target = self.players.get(pid)
+        if self.phase != "day" or not target or not target.alive or target.role == "spectator" or self._decision_expired():
+            return "낮 토론 중인 질문 대상자만 답할 수 있습니다."
+        entry = next((item for item in self.cross_examinations if item["id"] == challenge_id and item["round"] == self.round), None)
+        if not entry or entry["target_id"] != pid:
+            return "당신에게 도착한 이번 낮의 질문을 선택해 주세요."
+        response = " ".join(raw.strip().split())[:200]
+        if kind not in {"clarify", "revise"} or len(response) < 5:
+            return "설명 또는 판단 수정과 함께 다섯 글자 이상의 답변을 적어 주세요."
+        if entry["response"] is not None:
+            if entry["response"] == response and entry["response_kind"] == kind:
+                return None
+            return "이 기록 대조 질문에는 이미 답변했습니다."
+        entry.update({"response": response, "response_kind": kind, "responded_at": int(time.time() * 1000)})
+        self._record(f"기록 대조 답변 — {target.nick}님이 {'판단을 수정했습니다' if kind == 'revise' else '기록을 설명했습니다'}.")
+        self._moment("challenge_reply", "질문에 공개 답변이 남았습니다.", actor=pid)
+        for observer in self.players.values():
+            if observer.is_bot and observer.alive and observer.id != pid:
+                self._remember_ai(observer, "기록 대조 질문에 대한 공개 답변을 확인함", target, "neutral")
+        return None
+
     def add_tip(self, pid: str, raw: str) -> str | None:
         """Seal one anonymous lead per living player during each daytime round."""
         author = self.players.get(pid)
@@ -1209,10 +1351,11 @@ class Room:
         return None
 
     def _deal_private_leads(self, active: list[Player]) -> None:
-        """Give every player a plausible first-day talking point.
+        """Give every player an explicitly unverified first-day report.
 
-        A lead always names a playable suspect but never proves alignment. Mafia
-        receives one fabricated lead that looks identical after publication.
+        These story prompts precede the first resolved night. They are not
+        observations from the action ledger and never prove alignment. Mafia
+        receives a fabricated report in the same unverified format.
         """
         suspects = [player for player in active if player.role != "spectator"]
         mafia = [player for player in suspects if player.role == "mafia"]
@@ -1222,8 +1365,8 @@ class Room:
             pool = [player for player in suspects if player.id != owner.id]
             if not pool:
                 continue
-            # Exactly one genuine packet crosses a mafia route. The remaining
-            # observations are plausible false positives, so mass disclosure
+            # One packet points to a mafia route. These reports are unverified
+            # leads, not facts about observed movement, so mass disclosure
             # cannot identify the mafia by simple frequency counting.
             if truth_holder and owner.id == truth_holder.id:
                 suspect = random.choice(mafia)
@@ -1234,7 +1377,7 @@ class Room:
             self.private_leads[owner.id] = {
                 "id": secrets.token_hex(5),
                 "title": title,
-                "detail": template.format(suspect=suspect.nick),
+                "detail": "출처 미확인 제보: " + template.format(suspect=suspect.nick) + " 실제 밤 행동으로 검증된 사실은 아닙니다.",
                 "suspect_id": suspect.id,
                 "revealed": False,
                 "authentic": owner.role != "mafia",
@@ -1256,7 +1399,7 @@ class Room:
             "round": self.round, "suspect_id": lead["suspect_id"],
         }
         self.public_leads.append(public)
-        line = f"봉인 증거 공개 — {player.nick}: {lead['title']}"
+        line = f"미확인 제보 공개 — {player.nick}: {lead['title']}"
         self._record(line)
         self._moment("evidence", line, actor=pid, target=lead["suspect_id"])
         return None
@@ -1323,7 +1466,7 @@ class Room:
         self.scene_results[pid] = {
             "round": self.round, "score": score, "total": total,
             "correct_pairs": correct_pairs, "causal_pairs": causal_pairs,
-            "deduction": f"인과 복원 — {self.case_solution.get('chain_label', '접근 기록 → 기록 공백 → 습격의 흔적 → 알리바이 신호 → 봉인된 현장')}" if causal_pairs else "시계 기록만 믿지 말고 첫 단서와 마지막 봉인의 연결을 다시 확인하세요.",
+            "deduction": "접수된 행동 → 마감 → 정산 → 개인 결과 → 공개 보고의 흐름과 이번 밤의 실제 결과를 대조했습니다." if causal_pairs else "각 기록에 적힌 단계와 이번 밤의 사건 보고를 다시 대조하세요.",
             "submitted_at": int(time.time() * 1000),
         }
         self._record(f"{player.nick}님이 현장 타임라인을 제출했습니다. ({score}점)")
@@ -1332,6 +1475,10 @@ class Room:
 
     def _theory_key(self, pid: str, round_number: int | None = None) -> str:
         return f"{self.round if round_number is None else round_number}:{pid}"
+
+    def _theory_clues_for(self, pid: str) -> list[dict[str, Any]]:
+        events = {card.get("event_id") for card in self.scene_fragments.get(pid, [])}
+        return [clue for clue in self.clues if not clue.get("event_id") or clue["event_id"] in events]
 
     def _theory_view(self, theory: dict[str, Any], reveal: bool = False) -> dict[str, Any]:
         """Return the public portion of a sealed hypothesis.
@@ -1369,19 +1516,29 @@ class Room:
         """Resolve the three links in a hypothesis after the hidden roles are known."""
         target = self.players.get(str(theory.get("target_id", "")))
         clue = next((item for item in self.clues if item.get("id") == theory.get("clue_id")), None)
-        target_match = bool(target and target.role == "mafia")
-        fragment_match = str(theory.get("fragment_id")) == "attack"
-        clue_match = bool(clue and theory.get("target_id") in clue.get("suspect_ids", []))
+        if theory.get("_event_id"):
+            # Frozen private matches survive bounded public-record eviction.
+            target_match = bool(theory.get("_target_match"))
+            fragment_match = theory.get("_fragment_event_id") == theory.get("_event_id")
+            clue_match = bool(theory.get("_clue_match"))
+        else:
+            # Legacy records without a night-event reference keep their
+            # original interpretation; new matches always use the ledger.
+            target_match = bool(target and target.role == "mafia")
+            fragment_match = str(theory.get("fragment_id")) == "attack"
+            clue_match = bool(clue and theory.get("target_id") in clue.get("suspect_ids", []))
         matched_links = int(target_match) + int(fragment_match) + int(clue_match)
         if target_match and fragment_match and clue_match:
             status = "confirmed"
-            explanation = f"{theory['target']}님은 실제 마피아였고, {theory['fragment_title']}가 습격 시각과 일치했습니다."
+            explanation = (f"{theory['target']}님은 해당 밤의 실제 습격에 참여했고, 단서와 {theory['fragment_title']}가 같은 확정 사건에 연결됐습니다."
+                           if theory.get("_event_id") else
+                           f"{theory['target']}님은 실제 마피아였고, {theory['fragment_title']}가 습격 시각과 일치했습니다.")
         elif target_match and clue_match:
             status = "partial"
             explanation = f"{theory['target']}님은 마피아였지만, 선택한 시간 조각은 실제 습격 장면이 아니었습니다."
         elif fragment_match and clue_match:
             status = "partial"
-            explanation = f"습격 장면은 정확했지만 {theory['target']}님은 마피아가 아니었습니다. 단서가 만든 함정입니다."
+            explanation = f"같은 밤의 기록은 연결했지만 {theory['target']}님은 인용한 습격의 실제 참여자로 확인되지 않았습니다. 후보에 포함됐다는 사실만으로 정체가 증명되지는 않습니다."
         elif target_match:
             status = "partial"
             explanation = f"{theory['target']}님은 마피아였지만, 단서와 시간 연결을 완성하지 못했습니다."
@@ -1444,6 +1601,8 @@ class Room:
         )
         if not fragment:
             return "당신이 받은 시간 조각만 증거 연결에 사용할 수 있습니다."
+        if clue.get("event_id") and clue["event_id"] != fragment.get("event_id"):
+            return "감식 단서와 같은 밤에 받은 기록 조각을 선택해 주세요."
         now_ms = int(time.time() * 1000)
         theory = {
             "id": secrets.token_hex(6),
@@ -1461,6 +1620,10 @@ class Room:
             "stake": stake,
             "sealed_at": now_ms,
         }
+        if clue.get("event_id"):
+            theory.update({"_event_id": clue["event_id"], "_fragment_event_id": fragment.get("event_id"),
+                           "_target_match": target.id in clue.get("_attacker_ids", []),
+                           "_clue_match": target.id in clue.get("suspect_ids", [])})
         self.theories[key] = theory
         self.theory_stakes[pid] = remaining - stake
         line = f"{player.nick}님이 증거 연결 고리를 봉인했습니다. (인장 {stake}개)"
@@ -1723,19 +1886,15 @@ class Room:
         self.case_log.append(f"{speaker.nick}님의 공개 심문이 시작되었습니다.")
         key = f"{self.round}:{speaker.id}"
         for bot in (p for p in self.players.values() if p.is_bot and p.alive and p.id != speaker.id):
-            persona = self._bot_persona(bot)
             if bot.role == "mafia" and speaker.role == "mafia":
                 stance = "trust"
-            elif speaker.role == "mafia" and random.random() < min(0.92, 0.65 + persona["suspect_bias"]):
+            elif self.detective_results.get(bot.id, {}).get(speaker.id) is True:
                 stance = "suspect"
-            elif speaker.id in self._bot_suspicions.values() and random.random() < 0.8:
-                stance = "suspect"
+            elif self.detective_results.get(bot.id, {}).get(speaker.id) is False:
+                stance = "trust"
             else:
-                stance = random.choices(
-                    ["trust", "hold", "suspect"],
-                    weights=[max(1, 3 - int(persona["suspect_bias"] * 4)), 4, max(1, 2 + int(persona["suspect_bias"] * 4))],
-                    k=1,
-                )[0]
+                score = self._bot_target_score(bot, speaker)
+                stance = "suspect" if score >= 0.95 else "trust" if score <= -0.45 else "hold"
             self.reads.setdefault(bot.id, {})[key] = stance
 
     def _bot_persona(self, bot: Player) -> dict[str, Any]:
@@ -1764,15 +1923,20 @@ class Room:
         if not previous:
             return None
         if previous.get("emotion") in {"doubt", "anger"}:
-            return f"{target.nick}님, 지난 라운드에 한 말({previous.get('event')})과 지금 알리바이가 달라요."
-        return f"지난 라운드에 {target.nick}님을 믿었지만, 이번 기록과 다시 대조하겠습니다."
+            return f"{previous.get('round', self.round)}일차에 {target.nick}님을 더 확인해야 한다고 기록했습니다. 이번 공개 증거와 함께 다시 검토하겠습니다."
+        return f"{target.nick}님에 대한 이전 판단을 기억합니다. 새로 공개된 기록을 함께 확인하겠습니다."
 
     def _bot_target_score(self, bot: Player, target: Player) -> float:
         """Score public evidence so bot votes feel reasoned instead of random."""
         persona = self._bot_persona(bot)
         score = random.uniform(-0.35, 0.35) + float(persona["suspect_bias"])
         if self._bot_suspicions.get(bot.id) == target.id:
-            score += 3.2
+            score += 0.55
+        known = self.detective_results.get(bot.id, {}).get(target.id)
+        if known is True:
+            score += 4.0
+        elif known is False:
+            score -= 3.0
         relation = self.ai_relationships.get(bot.id, {}).get(target.id, {})
         score -= float(relation.get("trust", 0)) * 0.25
         score += float(relation.get("betrayals", 0)) * 0.45
@@ -1780,8 +1944,14 @@ class Room:
             score += 0.65
         if any(lead.get("suspect_id") == target.id for lead in list(self.public_leads)[-4:]):
             score += 0.45
-        if any(target.id == marked for marked in self.pressure_marks.values()):
+        if not (self.phase == "day" and self.round_event and self.round_event.get("sealed_pressure")) and any(target.id == marked for marked in self.pressure_marks.values()):
             score += 0.35
+        for question in self.cross_examinations:
+            if (question["round"] == self.round and question["target_id"] == target.id
+                    and target.id in question.get("_candidate_ids", [])):
+                # Only a cited public clue that actually names this candidate
+                # adds scrutiny. Question count by itself is not evidence.
+                score += 0.25 if question["response"] is None else 0.0
         if target.id == self.speaker_id:
             score += 0.18
         if bot.role == "mafia" and target.role != "mafia":
@@ -1811,7 +1981,7 @@ class Room:
                 if bot.role == "mafia":
                     pressure_targets = [p for p in pressure_targets if p.role != "mafia"]
                 preferred = self.players.get(self._bot_suspicions.get(bot.id, ""))
-                target = preferred if preferred in pressure_targets else self._bot_choose_target(bot, pressure_targets)
+                target = preferred if bot.role == "mafia" and preferred in pressure_targets else self._bot_choose_target(bot, pressure_targets)
                 if target:
                     self.apply_pressure(bot.id, target.id)
             if bot.id != self.speaker_id:
@@ -1823,9 +1993,7 @@ class Room:
                 candidates = [p for p in alive if p.id != bot.id]
                 if bot.role == "mafia":
                     candidates = [p for p in candidates if p.role != "mafia"]
-                target = self.players.get(self._bot_suspicions.get(bot.id, ""))
-                if not target or not target.alive:
-                    target = self._bot_choose_target(bot, candidates)
+                target = self._bot_choose_target(bot, candidates)
                 if target:
                     self._bot_suspicions[bot.id] = target.id
                     self._remember_ai(bot, "공개 심문에서 의심 지목", target, "doubt")
@@ -1844,7 +2012,7 @@ class Room:
                     self.claims.append({
                         "id": secrets.token_hex(4), "speaker_id": bot.id,
                         "speaker": bot.nick, "text": claim, "round": self.round,
-                        "at": int(time.time() * 1000),
+                        "at": int(time.time() * 1000), "suspect_id": target.id if target else None,
                     })
                     line = f"공식 진술 — {bot.nick}: {claim}"
                     self.case_log.append(line)
@@ -1884,7 +2052,7 @@ class Room:
                 if self.phase == "day" and self.theory_stakes.get(bot.id, 0) > 0 and elapsed > 22:
                     theory_key = self._theory_key(bot.id)
                     if theory_key not in self.theories and self.clues:
-                        latest_clues = list(self.clues)[-3:]
+                        latest_clues = self._theory_clues_for(bot.id)[-3:]
                         candidates = [
                             p for p in alive
                             if p.id != bot.id
@@ -1944,7 +2112,7 @@ class Room:
                         targets = [p for p in targets if p.role != "mafia"]
                     if targets:
                         preferred = self.players.get(self._bot_suspicions.get(bot.id, ""))
-                        target = preferred if preferred in targets else self._bot_choose_target(bot, targets)
+                        target = preferred if bot.role == "mafia" and preferred in targets else self._bot_choose_target(bot, targets)
                         if target:
                             self.votes[bot.id] = target.id
         elif self.phase == "defense" and self.accused_id:
@@ -1962,7 +2130,11 @@ class Room:
             for bot in bots:
                 if bot.id == self.accused_id or bot.id in self.judgements:
                     continue
-                self.judgements[bot.id] = random.random() < 0.58
+                accused = self.players.get(self.accused_id or "")
+                if not accused:
+                    continue
+                teammate = bot.role == "mafia" and accused.role == "mafia"
+                self.judgements[bot.id] = not teammate and self._bot_target_score(bot, accused) >= 0.9
 
     def _resolve_night(self) -> None:
         self.last_death_id = None
@@ -1987,11 +2159,13 @@ class Room:
             if actor and target and actor.role == "detective":
                 verdict = "마피아입니다" if target.role == "mafia" else "마피아가 아닙니다"
                 actor.intel.append(f"{self.round}일차: {target.nick}님은 {verdict}.")
+                self.detective_results.setdefault(actor.id, {})[target.id] = target.role == "mafia"
                 if actor.is_bot and target.role == "mafia":
                     self._bot_suspicions[actor.id] = target.id
 
         guarding = next(((guard, target) for guard, target in guard_targets if target == victim_id), None)
         clue_outcome = "습격 흔적"
+        outcome = "quiet"
         if victim_id and victim_id != saved_id and guarding and guarding[0] in self.players:
             guard = self.players[guarding[0]]
             guard.alive = False
@@ -2000,6 +2174,7 @@ class Room:
             self._record(line)
             self._moment("death", line, target=guard.id)
             clue_outcome = "경호 개입"
+            outcome = "guard"
         elif victim_id and victim_id != saved_id and victim_id in self.players:
             victim = self.players[victim_id]
             victim.alive = False
@@ -2008,24 +2183,30 @@ class Room:
             self._record(line)
             self._moment("death", line, target=victim.id)
             clue_outcome = "사망 사건"
+            outcome = "attack"
         elif victim_id and victim_id == saved_id:
             line = "누군가 습격받았지만 의사의 치료로 살아남았습니다."
             self._record(line)
             self._moment("rescue", line)
             clue_outcome = "치료 개입"
+            outcome = "rescue"
         else:
             line = "밤은 조용히 지나갔습니다. 아무도 희생되지 않았습니다."
             self._record(line)
             self._moment("dawn", line)
 
-        if victim_id:
-            attackers = [
+        attackers = [
                 actor_id for actor_id, target_id in self.actions.items()
                 if target_id == victim_id
                 and self.players.get(actor_id)
                 and self.players[actor_id].role == "mafia"
-            ]
+        ] if victim_id else []
+        night_record = self._record_night(outcome, line, self.last_death_id, attackers)
+        if victim_id:
             self._add_forensic_clue(attackers[0] if attackers else None, victim_id, clue_outcome)
+            if self.clues:
+                self.clues[-1]["event_id"] = night_record["id"]
+                self.clues[-1]["_attacker_ids"] = attackers
 
         if not self._check_win():
             self._set_phase("dawn", self._seconds("dawn"))
@@ -2114,6 +2295,8 @@ class Room:
         return False
 
     def _finish(self, winner: str) -> None:
+        if self.phase == "gameover":
+            return
         self.winner = winner
         self._resolve_theories()
         for theory in self.theories.values():
@@ -2229,7 +2412,7 @@ class Room:
 
     def _guide_for(self, viewer: Player) -> str:
         if self.phase == "lobby":
-            return "처음이라면 AI 플레이어를 채워 연습해 보세요. 퀵은 약 12분, 클래식은 20분 이상 깊게 토론하는 흐름입니다."
+            return "처음이라면 첫 사건에서 AI와 연습해 보세요. 퀵은 약 20~25분, 클래식은 35분 이상 깊게 토론하는 흐름입니다."
         if self.phase == "reveal":
             return f"당신은 {ROLE_NAMES.get(viewer.role, viewer.role)}입니다. 역할 카드는 다른 사람에게 보이지 않으니 승리 조건부터 확인하세요."
         if not viewer.alive and viewer.role == "mafia":
@@ -2249,14 +2432,16 @@ class Room:
         if self.phase == "day":
             speaker = self.players.get(self.speaker_id or "")
             if speaker:
-                event = self.round_event["title"] if self.round_event else "자정 사건"
+                event = (self.round_event or {}).get("title", "자정 사건")
                 can_tip = f"{self.round}:{viewer.id}" not in self.tip_marks
                 tip_hint = " 익명 제보실에서 출처 없는 단서를 한 번 봉인할 수 있습니다." if can_tip else " 익명 제보는 이미 봉인했습니다."
                 theory_hint = (
                     " 용의자·감식 단서·내 시간 조각을 증거 연결 고리로 봉인하고 인장을 걸 수 있습니다."
-                    if self.theory_stakes.get(viewer.id, 0) > 0 and self._theory_key(viewer.id) not in self.theories
+                    if self._theory_clues_for(viewer.id) and self.theory_stakes.get(viewer.id, 0) > 0 and self._theory_key(viewer.id) not in self.theories
                     else " 이번 낮의 증거 연결 고리는 이미 봉인했거나 인장을 모두 사용했습니다."
                 )
+                if not self._theory_clues_for(viewer.id):
+                    theory_hint = " 감식 단서가 없는 낮입니다. 이번 밤의 사건 보고와 공식 진술을 대조하는 질문을 남겨 보세요."
                 return f"{event} 적용 중. 현재 {speaker.nick}님이 집중 발언자입니다. 질문을 듣고 이번 낮 한 번뿐인 긴급 지목을 신중하게 사용하세요.{tip_hint}{theory_hint}"
             if viewer.intel:
                 return f"최근 조사 기록: {viewer.intel[-1]} 공개할지, 한 턴 더 숨길지 판단하세요."
@@ -2359,9 +2544,22 @@ class Room:
             for bot in self.players.values():
                 if not bot.is_bot:
                     continue
-                memories = self.ai_memories.get(bot.id, [])
+                memories = [item for item in self.ai_memories.get(bot.id, []) if item.get("target_id") == viewer.id]
                 relation = self.ai_relationships.get(bot.id, {}).get(viewer.id, {})
                 ai_social.append({"player_id": bot.id, "player": bot.nick, "persona": self._bot_persona(bot)["label"], "emotion": relation.get("emotion", "neutral"), "trust": int(relation.get("trust", 0)), "memory": memories[-1].get("event") if memories else "아직 당신에 대한 기억이 없습니다."})
+        visible_moments = []
+        for moment in self.moments:
+            if moment.get("kind") == "contract" and viewer.id not in {moment.get("actor"), moment.get("target")}:
+                continue
+            public_moment = dict(moment)
+            if moment.get("kind") == "pressure" and moment.get("round") == self.round and not pressure_visible and moment.get("actor") != viewer.id:
+                public_moment["target"] = None
+            visible_moments.append(public_moment)
+        night_summary = self._night_summary()
+        night_replay = [
+            {key: value for key, value in record.items() if key != "attacker_ids"}
+            for record in self.night_records
+        ] if self.phase == "gameover" else []
         return {
             "t": "state",
             "room": self.name,
@@ -2387,6 +2585,9 @@ class Room:
             "ghost_echoes": list(self.ghost_echoes),
             "director_beats": list(self.director_beats)[-5:],
             "tips": list(self.tips)[-12:],
+            "night_summary": night_summary,
+            "night_replay": night_replay,
+            "cross_examinations": [self._public_clue(entry) for entry in self.cross_examinations],
             "phase": self.phase,
             "phase_id": self.phase_id,
             "server_now": now_ms,
@@ -2474,7 +2675,13 @@ class Room:
                 "can_theorize": (
                     self.phase == "day" and viewer.alive and viewer.role != "spectator"
                     and self.theory_stakes.get(viewer.id, 0) > 0
-                    and current_theory is None
+                    and current_theory is None and bool(self._theory_clues_for(viewer.id))
+                ),
+                "can_challenge": (
+                    self.phase == "day" and viewer.alive and viewer.role != "spectator"
+                    and not self._decision_expired()
+                    and (bool(self.clues) or night_summary is not None)
+                    and not any(item["round"] == self.round and item["asker_id"] == viewer.id for item in self.cross_examinations)
                 ),
                 "oath_target": self.oaths.get(viewer.id, {}).get("target_id"),
                 "oath_text": self.oaths.get(viewer.id, {}).get("text", ""),
@@ -2515,7 +2722,7 @@ class Room:
             "skip_votes": sum(target == "skip" for target in self.votes.values()) if show_ballot_feed else 0,
             "story": list(self.story),
             "case_log": list(self.case_log),
-            "clues": list(self.clues),
+            "clues": [self._public_clue(clue) for clue in self.clues],
             "guide": self._guide_for(viewer),
             "chat": visible_chat[-30:],
             "ghost_chat": list(self.ghost_chat) if (not viewer.alive or viewer.role == "spectator") else [],
@@ -2529,7 +2736,7 @@ class Room:
             ][-5:],
             "claims": list(self.claims)[-12:],
             "read_summary": read_summary,
-            "moments": list(self.moments) if self.phase == "gameover" else list(self.moments)[-6:],
+            "moments": visible_moments if self.phase == "gameover" else visible_moments[-6:],
         }
 
     async def broadcast(self) -> None:
