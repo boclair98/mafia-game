@@ -41,3 +41,39 @@
   .landing-shell .join-mode-picker button { padding:12px 9px; min-height:94px; }
   .landing-shell .join-card .terms-check b { letter-spacing:0; }
 }
+
+.midnight-entry-shortcuts { max-width: 560px; margin-top: 13px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.midnight-entry-shortcuts > span { margin-right: 2px; color: #c2b9a8; font-size: 11px; }
+.midnight-entry-shortcuts > button { min-height: 40px; padding: 0 10px; border: 1px solid rgba(235,225,205,.18); background: rgba(5,7,10,.36); color: #e4ded2; font-size: 12px; font-weight: 650; cursor: pointer; }
+.midnight-entry-shortcuts > button:hover { border-color: rgba(210,185,139,.7); background: rgba(210,185,139,.09); }
+.midnight-entry-shortcuts > button:focus-visible { outline: 2px solid #e0c58d; outline-offset: 2px; }
+.join-room-help { display: block; margin-top: 7px; color: #b7b0a5; font-size: 12px; line-height: 1.55; word-break: keep-all; }
+.landing-shell .join-card .terms-check b { color: #e8e2d8; }
+.tutorial-controls > span { color: #b6ada0; font: 11px/1 monospace; font-variant-numeric: tabular-nums; }
+.tutorial-controls > div button { width: 44px; height: 36px; min-height: 44px; display: grid; place-items: center; background: transparent; }
+.tutorial-controls > div button::before { content: ""; width: 22px; height: 3px; display: block; background: rgba(255,255,255,.32); }
+.tutorial-controls > div button.active::before { background: var(--red); }
+.tutorial-film.scene-5 .tutorial-controls > div { display: none; }
+
+@media(max-width:600px) {
+  .midnight-hero { min-height: 580px; padding: 38px 20px 56px; }
+  .midnight-hero h1 { margin: 16px 0; font-size: clamp(40px, 11.2vw, 54px); line-height: 1.22; }
+  .midnight-hero-copy { font-size: 14px; line-height: 1.72; }
+  .midnight-hero-actions { margin-top: 20px; align-items: center; flex-direction: row; gap: 8px; }
+  .midnight-primary { min-width: 0; min-height: 52px; flex: 1; padding: 0 12px; font-size: 13px; }
+  .midnight-primary svg { width: 17px; flex: 0 0 auto; }
+  .midnight-guide { min-height: 44px; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(255,255,255,.22); font-size: 11px; white-space: nowrap; }
+  .midnight-entry-shortcuts { margin-top: 9px; gap: 4px; }
+  .midnight-entry-shortcuts > span { width: 100%; font-size: 10px; }
+  .midnight-entry-shortcuts > button { min-height: 40px; padding: 0 8px; font-size: 11px; }
+  .midnight-hero-note { margin-top: 8px; font-size: 11px; }
+  .midnight-facts { margin-top: 14px; gap: 8px 12px; flex-wrap: wrap; }
+  .tutorial-film { overflow-y: auto; }
+  .tutorial-copy { top: auto; bottom: clamp(190px, 24vh, 220px); max-height: calc(100dvh - 280px); overflow-y: auto; padding-right: 3px; }
+  .tutorial-copy h2 { font-size: clamp(24px, 7vw, 29px); }
+  .tutorial-copy p { font-size: 14px; line-height: 1.7; }
+  .tutorial-controls { gap: 8px; }
+  .tutorial-controls > div { gap: 0; }
+  .tutorial-controls > button { width: 44px; min-width: 44px; height: 44px; }
+  .tutorial-controls > .tutorial-done { min-width: 92px; }
+}

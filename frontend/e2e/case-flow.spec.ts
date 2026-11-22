@@ -42,6 +42,8 @@ for (const viewport of [{ width: 360, height: 800 }, { width: 390, height: 844 }
     expect(await page.evaluate(() => document.fonts.check('15px "Pretendard"'))).toBe(true);
     await expectNoOverflow(page);
     await page.getByRole("button", { name: "첫 사건 시작하기", exact: true }).click();
+    await expect(page.locator(".join-mode-picker button.first")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("#join-room-help")).toContainText("첫 사건을 만들기 위한 코드");
     await expect(page.locator("#landing-nick")).toBeFocused();
     await page.keyboard.press("Tab");
     await page.keyboard.press("Shift+Tab");
@@ -76,6 +78,29 @@ for (const viewport of [{ width: 360, height: 800 }, { width: 390, height: 844 }
   });
 }
 
+test("rule preview waits for the player and supports manual steps on mobile", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "룰 미리보기" }).click();
+  const title = page.locator(".tutorial-copy h2");
+  await expect(title).toHaveText("밤에는 역할이 움직입니다");
+  await page.waitForTimeout(7000);
+  await expect(title).toHaveText("밤에는 역할이 움직입니다");
+  const controls = page.locator(".tutorial-controls");
+  await expect(controls.getByRole("button", { name: "다음 장면" })).toBeVisible();
+  await controls.getByRole("button", { name: "다음 장면" }).click();
+  await expect(title).toHaveText("단서는 범인을 포함합니다");
+  await expect(controls.getByText("2 / 5번째 장면")).toHaveClass(/sr-only/);
+  await controls.getByRole("button", { name: "5번째 장면 보기" }).click();
+  await expect(title).toHaveText("모든 거짓말은 사건 파일에 남습니다");
+  await expect(controls.getByRole("button", { name: "이전 장면" })).toBeVisible();
+  await expect(controls.getByRole("button", { name: "안내 닫기" })).toBeVisible();
+  expect(await controls.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: "test-results/rule-preview-final-mobile.png" });
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".tutorial-film")).not.toBeVisible();
+});
+
 test("actual first case: finalized night -> cited question -> bot reply -> responsive records", async ({ page }) => {
   test.setTimeout(140_000);
   let droppedQuestion = false;
@@ -102,6 +127,14 @@ test("actual first case: finalized night -> cited question -> bot reply -> respo
   // The explicit local test runner seeds this first-case host as Mafia.
   // Production has no deterministic seed or shortened-clock switch.
   expect(current()?.me.role).toBe("mafia");
+  const coach = page.getByTestId("first-case-coach");
+  await expect(coach).toBeVisible();
+  await expect(coach.locator("h2")).toHaveText("마피아: 밤의 능력을 선택하세요");
+  await expect(coach).toContainText("마감 전에는 선택을 바꿀 수 있습니다.");
+  await coach.getByRole("button", { name: "안내 접기" }).click();
+  await expect(coach.getByRole("button", { name: "안내 열기" })).toHaveAttribute("aria-expanded", "false");
+  await coach.getByRole("button", { name: "안내 열기" }).click();
+  await expect(coach.locator("h2")).toBeVisible();
   const target = current()!.players.find((player) => player.bot && player.alive)!;
   await page.locator(".player-card").filter({ hasText: target.n }).click();
   await page.locator(".action-bar .seal-button").click();
@@ -114,6 +147,7 @@ test("actual first case: finalized night -> cited question -> bot reply -> respo
   await page.screenshot({ path: "test-results/night-action.png", fullPage: false });
   await expect.poll(() => current()?.phase, { timeout: 25_000 }).toBe("day");
   await dismissPhase(page);
+  await expect(coach.locator("h2")).toHaveText(/(지금은 당신의 집중 발언 차례예요|말과 기록이 어긋나는지 들어 보세요)/);
   // A real doctor bot may save the selected target; neither outcome is mocked.
   expect(["attack", "rescue"]).toContain(current()?.night_summary?.outcome);
   await expect(page.getByTestId("cross-examination-panel")).toBeVisible();

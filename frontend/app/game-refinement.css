@@ -328,3 +328,97 @@
 .tutorial-copy > small { font-size:11px; }
 
 .game-shell .player-info strong { white-space:normal; overflow:visible; text-overflow:clip; overflow-wrap:anywhere; word-break:keep-all; }
+
+/* Guided first case: concise, role-aware help without pausing the server clock. */
+.game-shell .first-case-coach {
+  width: min(1480px, calc(100% - 48px));
+  margin: 12px auto 0;
+  overflow: hidden;
+  border: 1px solid rgba(209, 168, 92, .3);
+  background: linear-gradient(110deg, rgba(24, 27, 32, .96), rgba(13, 17, 23, .96));
+  box-shadow: inset 3px 0 #d1a85c, 0 12px 28px rgba(0, 0, 0, .22);
+}
+.first-case-coach-head { min-height: 58px; padding: 9px 16px; display: flex; align-items: center; gap: 11px; }
+.first-case-coach-head > svg { flex: 0 0 auto; color: #d4b77c; }
+.first-case-coach-head > span { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.first-case-coach-head small { color: #b69b68; font: 700 10px/1.4 monospace; letter-spacing: .06em; }
+.first-case-coach-head b { color: #f0ece4; font-size: 14px; }
+.first-case-coach-head button { min-width: 88px; min-height: 40px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #4a4234; background: rgba(255,255,255,.035); color: #ddd4c1; font-size: 12px; font-weight: 700; cursor: pointer; }
+.first-case-coach-head button:focus-visible { outline: 2px solid #ead099; outline-offset: 2px; }
+.first-case-coach-copy { padding: 13px 18px 15px 44px; display: grid; grid-template-columns: minmax(200px, .36fr) minmax(0, 1fr); align-items: start; gap: 5px 18px; border-top: 1px solid rgba(255,255,255,.08); }
+.first-case-coach-copy h2 { margin: 0; color: #f0ece4; font: 600 16px/1.45 var(--serif); word-break: keep-all; }
+.first-case-coach-copy p { margin: 0; color: #c5c6c9; font-size: 13px; line-height: 1.65; word-break: keep-all; }
+.first-case-coach-copy > small { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; color: #aaaeb5; font-size: 11px; line-height: 1.5; }
+.first-case-coach-copy > small svg { flex: 0 0 auto; color: #d4b77c; }
+.first-case-coach.is-closed .first-case-coach-head { min-height: 50px; }
+
+/* Phase changes are readable, dismissible cues—not a full-screen pause. */
+.game-shell .phase-alert {
+  position: fixed;
+  inset: auto 14px auto auto;
+  top: calc(env(safe-area-inset-top) + 68px);
+  z-index: 80;
+  width: min(460px, calc(100vw - 28px));
+  padding: 0;
+  display: block;
+  pointer-events: none;
+  background: transparent;
+  backdrop-filter: none;
+  animation: none;
+}
+.game-shell .phase-alert-card {
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 13px 54px 14px 58px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  justify-content: initial;
+  gap: 3px 10px;
+  text-align: left;
+  border: 1px solid rgba(226, 205, 164, .38);
+  background: linear-gradient(115deg, rgba(24, 27, 32, .98), rgba(9, 12, 17, .98));
+  box-shadow: 0 18px 52px rgba(0,0,0,.56), inset 3px 0 #c65c62;
+  pointer-events: auto;
+  animation: phase-toast-in 4.2s ease both;
+}
+.game-shell .phase-alert-card::before,.game-shell .phase-alert-card::after { display: none; }
+.game-shell .phase-alert-kicker { grid-column: 1; grid-row: 1; color: #d4b77c; font-size: 9px; }
+.game-shell .phase-alert-icon { position: absolute; left: 15px; top: 50%; width: 30px; height: 30px; margin: 0; transform: translateY(-50%); box-shadow: none; }
+.game-shell .phase-alert-icon svg { width: 18px; height: 18px; }
+.game-shell .phase-alert h2 { grid-column: 1; grid-row: 2; font: 600 17px/1.3 var(--serif); }
+.game-shell .phase-alert p { grid-column: 1 / -1; margin: 2px 0 0; color: #c0c3c9; font-size: 12px; line-height: 1.5; }
+.game-shell .phase-alert-countdown { position: absolute; top: 13px; right: 48px; margin: 0; gap: 4px; }
+.game-shell .phase-alert-countdown b { font: 700 13px/1 monospace; color: #e1c98f; }
+.game-shell .phase-alert-countdown span { font-size: 10px; }
+.game-shell .phase-alert-continue { position: absolute; top: 8px; right: 8px; width: 38px; min-width: 38px; height: 38px; min-height: 38px; padding: 0; display: grid; place-items: center; border: 1px solid #45474d; background: #15191f; color: #d9d7d1; cursor: pointer; }
+.game-shell .phase-alert-continue:focus-visible { outline: 2px solid #ead099; outline-offset: 2px; }
+.game-shell .phase-alert-line { width: 100%; bottom: 0; }
+.game-shell .phase-alert-line i { animation: phase-toast-progress 4.2s linear both; }
+@keyframes phase-toast-in { 0% { opacity: 0; transform: translateY(-6px); } 8%, 86% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-4px); } }
+@keyframes phase-toast-progress { from { width: 100%; } to { width: 0; } }
+
+@media (max-width: 760px) {
+  .game-shell .first-case-coach { width: calc(100% - 20px); margin: 9px auto 0; }
+  .first-case-coach-head { min-height: 54px; padding: 8px 11px; gap: 9px; }
+  .first-case-coach-head small { font-size: 9px; }
+  .first-case-coach-head b { font-size: 13px; }
+  .first-case-coach-head button { min-width: 82px; min-height: 44px; font-size: 11px; }
+  .first-case-coach-copy { padding: 11px 12px 13px; grid-template-columns: 1fr; gap: 5px; }
+  .first-case-coach-copy h2 { font-size: 15px; }
+  .first-case-coach-copy p { font-size: 12px; }
+  .first-case-coach-copy > small { grid-column: 1; font-size: 10px; }
+  .game-shell .phase-alert { left: 10px; right: 10px; top: calc(env(safe-area-inset-top) + 64px); width: auto; }
+  .game-shell .phase-alert-card { padding: 11px 50px 12px 48px; gap: 3px 8px; }
+  .game-shell .phase-alert-icon { left: 11px; width: 27px; height: 27px; }
+  .game-shell .phase-alert-kicker { font-size: 8px; }
+  .game-shell .phase-alert h2 { font-size: 15px; }
+  .game-shell .phase-alert p { font-size: 11px; }
+  .game-shell .phase-alert-countdown { top: 11px; right: 43px; }
+  .game-shell .phase-alert-countdown b { font-size: 12px; }
+  .game-shell .phase-alert-continue { top: 6px; right: 6px; width: 38px; min-width: 38px; height: 38px; min-height: 38px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .game-shell .phase-alert-card,.game-shell .phase-alert-line i { animation: none !important; }
+}

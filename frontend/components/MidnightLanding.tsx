@@ -40,8 +40,14 @@ export default memo(function MidnightLanding({ players, invited, onPlay, onJoin,
         <div className="midnight-eyebrow"><span /> REALTIME SOCIAL DEDUCTION</div>
         <h1 id="midnight-title">이 방 안에,<br /> <em>범인이 있다.</em></h1>
         <p className="midnight-hero-copy">같은 밤. 다른 진실.<br />단서를 읽고, 진술을 의심하고, 당신의 한 표로<br className="desktop-break" /> 사건의 결말을 바꾸세요.</p>
-        <div className="midnight-hero-actions"><button className="midnight-primary" onClick={() => onPlay(invited ? "party" : "first")}><Fingerprint size={20} />{invited ? "초대받은 사건에 합류" : "첫 사건 시작하기"}<ArrowUpRight size={20} /></button><button className="midnight-guide" onClick={onGuide}><BookOpen size={17} />플레이 방법</button></div>
-        <p className="midnight-hero-note">{invited ? "초대 링크의 방 코드로 이어집니다" : "처음이라면 AI 3명과 함께 · 약 8–12분"}</p>
+        <div className="midnight-hero-actions"><button className="midnight-primary" onClick={() => onPlay(invited ? "party" : "first")}><Fingerprint size={20} />{invited ? "초대받은 사건에 합류" : "첫 사건 시작하기"}<ArrowUpRight size={20} /></button><button className="midnight-guide" onClick={onGuide}><BookOpen size={17} />룰 미리보기</button></div>
+        {!invited && <div className="midnight-entry-shortcuts" aria-label="다른 플레이 방식">
+          <span>다른 방식</span>
+          <button type="button" onClick={() => onPlay("party")}>친구와 플레이</button>
+          <button type="button" onClick={() => onPlay("solo")}>혼자 수사</button>
+          <button type="button" onClick={onJoin}>초대 코드 입력</button>
+        </div>}
+        <p className="midnight-hero-note">{invited ? "초대 링크의 방 코드로 이어집니다" : "처음이라면 AI 3명과 함께 · 실제 규칙을 배우는 짧은 경기"}</p>
         <div className="midnight-facts"><span><Users size={15} />4–12인</span><span><Headphones size={15} />음성·텍스트 토론</span><span><span className="fact-dot" />설치 없이 플레이</span></div>
       </div>
       <div className="midnight-scene-label"><span>BLACK MIDNIGHT / CRIME SCENE</span><b>아무도 이 방을 떠날 수 없다.</b><i /></div>
@@ -53,7 +59,7 @@ export default memo(function MidnightLanding({ players, invited, onPlay, onJoin,
       <div className="midnight-mode-grid">
         <button className="midnight-mode" onClick={() => onPlay("party")}><span className="mode-icon"><Users size={24} strokeWidth={1.5} /></span><span className="mode-top">함께하는 심리전 <i>4–12인</i></span><b>친구와 사건 시작</b><p>링크 하나로 초대하세요.<br />가장 가까운 사람이 범인일지도.</p><span className="mode-link">새 방 만들기<ArrowUpRight size={17} /></span></button>
         <button className="midnight-mode" onClick={() => onPlay("solo")}><span className="mode-icon"><Bot size={24} strokeWidth={1.5} /></span><span className="mode-top">나만의 추리 시간 <i>AI 7명</i></span><b>혼자 수사</b><p>서로 다른 성향의 AI 용의자들.<br />그들의 알리바이를 파헤치세요.</p><span className="mode-link">수사 시작하기<ArrowUpRight size={17} /></span></button>
-        <button className="midnight-mode first-mode" onClick={() => onPlay("first")}><span className="mode-icon"><BookOpen size={24} strokeWidth={1.5} /></span><span className="mode-top">처음이라면 여기서 <i>입문 추천</i></span><b>첫 번째 사건</b><p>AI 3명과 함께 배우는 실제 경기.<br />진행관의 안내로 한 단계씩 배우세요.</p><span className="mode-link">첫 사건 열기<ArrowUpRight size={17} /></span></button>
+        <button className="midnight-mode first-mode" onClick={() => onPlay("first")}><span className="mode-icon"><BookOpen size={24} strokeWidth={1.5} /></span><span className="mode-top">처음이라면 여기서 <i>입문 추천</i></span><b>첫 번째 사건</b><p>AI 3명과 실제 규칙으로 플레이.<br />역할과 단계별로 진행관이 안내합니다.</p><span className="mode-link">첫 사건 열기<ArrowUpRight size={17} /></span></button>
       </div>
     </section>
 
