@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import desc, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -64,6 +65,7 @@ class CaseResult:
     timeline_score: int = 0
     social_actions: int = 0
     badges: tuple[str, ...] = ()
+    match_id: str | None = None
 
     @property
     def xp_earned(self) -> int:
@@ -208,6 +210,13 @@ async def record_case_result(
 ) -> InvestigatorProfile:
     """Atomically add one completed case to the user's passport."""
     profile = await ensure_profile(session, user, for_update=True)
+    match_id = UUID(result.match_id) if result.match_id else None
+    if match_id is not None and await session.scalar(
+        select(CaseRun.id).where(CaseRun.user_id == user.id, CaseRun.match_id == match_id)
+    ) is not None:
+        # The profile row lock serializes retries for the same user. The DB
+        # unique constraint also protects non-cooperating/direct inserts.
+        return profile
     today = datetime.now(UTC).date()
     yesterday = today - timedelta(days=1)
 
@@ -258,6 +267,7 @@ async def record_case_result(
     session.add(
         CaseRun(
             user_id=user.id,
+            match_id=match_id,
             case_code=result.case_code,
             case_title=result.case_title,
             mode=result.mode,

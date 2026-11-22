@@ -16,6 +16,8 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     serviceWorkers: "block",
+    // Synthetic media only: automated tests must never capture the host mic.
+    launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] },
   },
   webServer: process.env.BROWSER_BASE_URL ? undefined : {
     command: "node tests/serve-export.mjs",

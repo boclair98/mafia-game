@@ -50,6 +50,9 @@ services:
     timeout: 3600
     env:
       DATABASE_URL: postgresql+asyncpg://${db.user}:${db.password}@${db.host}:${db.port}/${db.name}
+      # A single fenced runtime owns durable game progression. This is recovery,
+      # not horizontal room sharding or a claim of40k concurrent capacity.
+      ROOM_PERSISTENCE_ENABLED: "true"
 
   db:
     type: postgres

@@ -1,14 +1,15 @@
 """Server-authoritative social deduction game state.
 
-Rooms are intentionally in-memory: a room link creates a lightweight match,
-and only state changes plus a one-second clock pulse are broadcast. Private
-roles, night actions, and detective results are filtered per connection.
+The game rules remain synchronous. Production can attach a fenced PostgreSQL
+checkpoint store; successful state is then persisted before it is broadcast.
+Private roles, night actions and detective results are filtered per connection.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
 import re
 import secrets
@@ -16,9 +17,18 @@ import time
 from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.core.config import settings
+from app.services.room_checkpoint import (
+    ROOM_FIELDS,
+    checkpoint_signature,
+    decode_room,
+    encode_room,
+)
+from app.services.room_store import RoomRecoveringError, RoomStore
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
@@ -27,6 +37,7 @@ else:
 
 MIN_PLAYERS = 4
 MAX_PLAYERS = 12
+VOICE_MAX_PARTICIPANTS = 12
 PACE_SECONDS = {
     # A guided first case is deliberately short enough to finish in one sitting
     # while still leaving space for the director's narration and a real vote.
@@ -357,6 +368,119 @@ class Room:
         self._last_broadcast_payloads: dict[str, str] = {}
         self._voice_generation = 0
         self.last_activity = time.time()
+        self.match_id = str(uuid4())
+        self._pending_score_results: list[dict[str, Any]] = []
+        self.mutation_lock = asyncio.Lock()
+        self._store: RoomStore | None = None
+        self._manager: RoomManager | None = None
+        self._durable_checkpoint: dict | None = None
+        self._durable_revision = 0
+        self._recovery_paused = False
+        self._clock_saved_at = 0.0
+        self._score_task: asyncio.Task | None = None
+        self._last_score_attempt = 0.0
+        self._deferred_closes: list[tuple[Any, int, str]] = []
+        self._voice_notices: dict[str, str] = {}
+        self._last_clock_checkpoint_at = 0.0
+
+    def _resume_clock(self) -> None:
+        if not self._recovery_paused:
+            return
+        gap = max(0.0, time.time() - self._clock_saved_at)
+        if self.deadline:
+            self.deadline += gap
+        if self.speaker_deadline:
+            self.speaker_deadline += gap
+        self.phase_started_at += gap
+        self.last_activity = time.time()
+        self._recovery_paused = False
+
+    def _pause_clock(self) -> None:
+        if not self._recovery_paused:
+            self._clock_saved_at = time.time()
+            self._recovery_paused = True
+
+    def _restore_committed(self) -> None:
+        restored = decode_room(self._durable_checkpoint) if self._durable_checkpoint else Room(self.name)
+        from app.services.room_checkpoint import DEQUES, SETS
+        for name in [*ROOM_FIELDS, *DEQUES, *SETS, "players"]:
+            setattr(self, name, getattr(restored, name))
+        self._recovery_paused = True
+        self._clock_saved_at = restored._clock_saved_at or time.time()
+        self._voice_generation = restored._voice_generation
+        self._last_broadcast_payloads.clear()
+        self._deferred_closes.clear()
+        self._voice_notices.clear()
+
+    async def suspend(self) -> None:
+        sockets = [player.ws for player in self.players.values() if player.ws is not None]
+        self._restore_committed()
+        for socket in sockets:
+            try:
+                await socket.close(code=4008, reason="room_recovering")
+            except Exception:
+                pass
+
+    async def commit(self) -> None:
+        """Called while mutation_lock is held, before any successful state."""
+        if self._store is None:
+            return
+        if self._manager is not None and self._manager._rooms.get(self.name) is not self:
+            raise RoomRecoveringError("retired_room")
+        try:
+            if not getattr(self._store, "locally_valid", self._store.epoch is not None):
+                raise RoomRecoveringError("room_recovering")
+            payload = encode_room(self)
+            expiry = getattr(self._store, "expiries", {}).get(self.name, float("inf"))
+            refresh = bool(self.connected_players) and expiry - time.time() < settings.room_checkpoint_ttl_seconds / 2
+            clock_due = (
+                not self._recovery_paused and bool(self.connected_participants)
+                and self.phase not in {"lobby", "gameover"}
+                and time.time() - self._last_clock_checkpoint_at >= settings.room_clock_checkpoint_seconds
+            )
+            if not (refresh or clock_due) and self._durable_checkpoint is not None and checkpoint_signature(payload) == checkpoint_signature(self._durable_checkpoint):
+                if self._store.epoch is None:
+                    raise RoomRecoveringError("room_recovering")
+                self._schedule_scores()
+                return
+            if self.players:
+                revision = await self._store.save(payload, self._durable_revision)
+            else:
+                await self._store.remove(self.name, self._durable_revision)
+                revision = 0
+            self._durable_checkpoint = payload
+            self._durable_revision = revision
+            self._last_clock_checkpoint_at = time.time()
+        except Exception as error:
+            self._store.epoch = None
+            if self._manager:
+                self._manager._persistence_ready = False
+            await self.suspend()
+            raise RoomRecoveringError("room_recovering") from error
+        for socket, code, reason in self._deferred_closes:
+            try:
+                await socket.close(code=code, reason=reason)
+            except Exception:
+                pass
+        self._deferred_closes.clear()
+        self._schedule_scores()
+
+    def _schedule_scores(self) -> None:
+        if self._manager is not None and self._manager._shutting_down:
+            return
+        if not self._pending_score_results or (self._score_task and not self._score_task.done()):
+            return
+        if time.monotonic() - self._last_score_attempt < 5:
+            return
+        try:
+            self._last_score_attempt = time.monotonic()
+            self._score_task = asyncio.get_running_loop().create_task(self._persist_scores())
+        except RuntimeError:
+            pass
+
+    def _ensure_ticker(self) -> None:
+        if self._task is None or self._task.done():
+            self._task = asyncio.get_running_loop().create_task(self._ticker())
 
     def _record(self, line: str) -> None:
         self.story.append(line)
@@ -645,9 +769,14 @@ class Room:
         return [p for p in self.players.values() if p.connected and not p.is_bot]
 
     @property
+    def connected_participants(self) -> list[Player]:
+        """Only playable humans may keep or resume a recovered match clock."""
+        return [p for p in self.connected_players if p.role != "spectator"]
+
+    @property
     def lobby_seats(self) -> list[Player]:
         """Playable lobby seats: connected humans plus server-owned bots."""
-        return [p for p in self.players.values() if p.connected or p.is_bot]
+        return [p for p in self.players.values() if p.role != "spectator" and (p.connected or p.is_bot)]
 
     def join(
         self,
@@ -660,6 +789,8 @@ class Room:
         self._voice_generation += 1
         existing = next((p for p in self.players.values() if p.key == player_key), None)
         if existing:
+            if not existing.is_bot and existing.role != "spectator":
+                self._resume_clock()
             existing.ws = ws
             existing.socket_owner = ws
             existing.connected = True
@@ -671,9 +802,11 @@ class Room:
             # A resumed seat has a new socket and must receive a fresh snapshot
             # even if the game state did not change while it reconnected.
             self._last_broadcast_payloads.pop(existing.id, None)
+            self._ensure_ticker()
             return existing, True
 
-        if self.phase == "lobby" and len(self.players) < MAX_PLAYERS:
+        if self.phase == "lobby" and sum(p.role != "spectator" for p in self.players.values()) < MAX_PLAYERS:
+            self._resume_clock()
             player = Player(
                 id=secrets.token_urlsafe(6),
                 key=player_key,
@@ -698,8 +831,7 @@ class Room:
             )
             self.players[player.id] = player
 
-        if self._task is None or self._task.done():
-            self._task = asyncio.get_running_loop().create_task(self._ticker())
+        self._ensure_ticker()
         return player, False
 
     def _ensure_host(self, preferred: Player | None = None) -> None:
@@ -741,6 +873,8 @@ class Room:
         else:
             player.connected = False
             player.ws = None
+            if self._store is not None and not self.connected_participants:
+                self._pause_clock()
         self._ensure_host()
         return True
 
@@ -760,6 +894,14 @@ class Room:
         player = self.players.get(pid)
         if not player or player.is_bot:
             return "음성 채팅에 참여할 수 없는 좌석입니다."
+        channel = self._voice_channel(player)
+        if enabled and not player.voice and channel is not None:
+            active = sum(
+                p.id != pid and p.voice and p.connected and not p.is_bot and self._voice_channel(p) == channel
+                for p in self.players.values()
+            )
+            if active >= VOICE_MAX_PARTICIPANTS:
+                return "이 음성 채널은 최대 12명까지 참여할 수 있습니다. 다른 참가자가 나간 뒤 다시 시도해 주세요."
         player.voice = enabled and player.connected
         return None
 
@@ -810,12 +952,12 @@ class Room:
             return "방장만 AI 플레이어를 초대할 수 있습니다."
         target = max(MIN_PLAYERS, min(target, 8, MAX_PLAYERS))
         removable = [p for p in self.players.values() if p.is_bot]
-        while len(self.players) > target and removable:
+        while len(self.lobby_seats) > target and removable:
             bot = removable.pop()
             self.players.pop(bot.id, None)
             self._record(f"AI 플레이어 {bot.nick}님이 테이블을 떠났습니다.")
         available = [name for name in BOT_NAMES if name not in {p.nick for p in self.players.values()}]
-        while len(self.players) < target and available:
+        while len(self.lobby_seats) < target and available:
             name = available.pop(random.randrange(len(available)))
             bot = Player(
                 id=secrets.token_urlsafe(6), key=f"bot-{secrets.token_urlsafe(10)}",
@@ -864,6 +1006,10 @@ class Room:
         self.players.pop(target_id, None)
         target.connected = False
         if target.ws:
+            if self._store is not None:
+                self._deferred_closes.append((target.ws, 4003, "removed_by_host"))
+                self._record(f"{target.nick}님이 방장에 의해 대기실에서 제외되었습니다.")
+                return None
             try:
                 asyncio.get_running_loop().create_task(
                     target.ws.close(code=4003, reason="removed_by_host")
@@ -885,8 +1031,10 @@ class Room:
             return f"아직 준비하지 않은 참가자: {', '.join(not_ready[:3])}"
 
         # Disconnected lobby seats never enter the game.
-        self.players = {p.id: p for p in active}
+        observers = [p for p in self.players.values() if p.role == "spectator" and p.connected]
+        self.players = {p.id: p for p in [*active, *observers]}
         self.mode = "solo" if sum(not p.is_bot for p in active) == 1 else "party"
+        self.match_id = str(uuid4())
         mafia_count = 1 if self.case_mode == "first" else (2 if len(active) >= 7 else 1)
         roles = ["mafia"] * mafia_count + ["doctor", "detective"]
         if self.case_mode == "first":
@@ -998,6 +1146,8 @@ class Room:
             return "방장만 다시 게임을 준비할 수 있습니다."
         self.players = {p.id: p for p in self.players.values() if p.connected or p.is_bot}
         for player in self.players.values():
+            if player.role == "spectator":
+                continue
             player.role = "citizen"
             player.alive = True
             player.ready = player.is_bot
@@ -1727,27 +1877,34 @@ class Room:
 
     async def _ticker(self) -> None:
         while self.players:
-            if not self.connected_players and time.time() - self.last_activity > 300:
-                self.players.clear()
-                break
-            self._run_interrogation()
-            self._run_bots()
-            elapsed = time.time() - self.phase_started_at
-            minimum = EARLY_ADVANCE_MINIMUM[self.pace].get(self.phase, 0)
-            early_ready = (
-                self.phase in {"vote", "verdict", "night"}
-                and elapsed >= minimum
-                and self._decisions_complete()
-            )
-            if early_ready or (
-                self.phase != "lobby" and self.deadline and time.time() >= self.deadline
-            ):
-                self._advance()
-            await self.broadcast()
+            try:
+                async with self.mutation_lock:
+                    durable_ready = self._store is None or (self._manager is not None and self._manager.persistence_ready)
+                    if durable_ready:
+                        idle_limit = settings.room_checkpoint_ttl_seconds if self._store else 300
+                        if not self.connected_players and time.time() - self.last_activity > idle_limit:
+                            self.players.clear()
+                        elif not self._recovery_paused:
+                            self._run_interrogation()
+                            self._run_bots()
+                            elapsed = time.time() - self.phase_started_at
+                            minimum = EARLY_ADVANCE_MINIMUM[self.pace].get(self.phase, 0)
+                            early_ready = (
+                                self.phase in {"vote", "verdict", "night"}
+                                and elapsed >= minimum and self._decisions_complete()
+                            )
+                            if early_ready or (
+                                self.phase != "lobby" and self.deadline and time.time() >= self.deadline
+                            ):
+                                self._advance()
+                        await self.commit()
+                        await self._broadcast_committed()
+            except RoomRecoveringError:
+                pass  # No uncommitted state was broadcast. Runtime retries storage.
             await asyncio.sleep(1)
         # The manager owns room references, so clearing players alone would
         # otherwise leave an empty room object behind forever.
-        rooms.sweep(self.name)
+        (self._manager or rooms).sweep(self.name)
 
     def _advance(self) -> None:
         if self.phase == "reveal":
@@ -2360,17 +2517,12 @@ class Room:
         self._set_phase("gameover", 0)
         if not any(player.coders_id is not None for player in self.players.values()):
             return
-        try:
-            asyncio.get_running_loop().create_task(self._persist_scores())
-        except RuntimeError:
-            # Pure unit tests may resolve a match outside an event loop.
-            pass
+        self._freeze_score_results()
+        if self._store is None:
+            self._schedule_scores()
 
-    async def _persist_scores(self) -> None:
-        """Persist every signed-in participant as soon as a match ends."""
-        from app.routes.leaderboard import persist_best_score
-        from app.services.passport import CaseResult
-
+    def _freeze_score_results(self) -> None:
+        """Freeze result data before rematch can replace roles and the case."""
         def social_actions_for(player_id: str) -> int:
             questions = sum(1 for item in self.questions if item.get("from_id") == player_id)
             claims = sum(1 for item in self.claims if item.get("speaker_id") == player_id)
@@ -2379,7 +2531,6 @@ class Room:
             echoes = sum(1 for item in self.ghost_echoes if item.get("owner_id") == player_id)
             return min(20, questions + claims + oaths + contracts + echoes)
 
-        writes = []
         for player in self.players.values():
             if player.coders_id is None or player.score <= 0 or player.role == "spectator":
                 continue
@@ -2387,21 +2538,40 @@ class Room:
                 self.winner == "citizen" and player.role not in {"mafia", "trickster", "spectator"}
             ) or (self.winner == "trickster" and player.role == "trickster")
             scene_score = int((self.scene_results.get(player.id) or {}).get("score", 0))
-            result = CaseResult(
-                case_code=str(self.case_profile.get("code", "BM-000")),
-                case_title=str(self.case_profile.get("title", "검은 자정 사건")),
-                mode="solo" if self.mode == "solo" else "party",
-                winner=str(self.winner or "unknown"),
-                score=int(player.score),
-                grade=str(self.case_grade or "C"),
-                won=won,
-                timeline_score=scene_score,
-                social_actions=social_actions_for(player.id),
-                badges=tuple(str(item.get("id")) for item in self.case_badges if item.get("id")),
-            )
-            writes.append(persist_best_score(player.coders_id, player.nick, player.score, case_result=result))
-        if writes:
-            await asyncio.gather(*writes, return_exceptions=True)
+            self._pending_score_results.append({
+                "coders_id": str(player.coders_id), "name": player.nick, "score": player.score,
+                "result": {
+                    "match_id": self.match_id,
+                    "case_code": str(self.case_profile.get("code", "BM-000")),
+                    "case_title": str(self.case_profile.get("title", "검은 자정 사건")),
+                    "mode": "solo" if self.mode == "solo" else "party",
+                    "winner": str(self.winner or "unknown"), "score": int(player.score),
+                    "grade": str(self.case_grade or "C"), "won": won,
+                    "timeline_score": scene_score, "social_actions": social_actions_for(player.id),
+                    "badges": [str(item.get("id")) for item in self.case_badges if item.get("id")],
+                },
+            })
+
+    async def _persist_scores(self) -> None:
+        """Retry durable result intents; unique match IDs prevent double XP."""
+        from app.routes.leaderboard import persist_best_score
+        from app.services.passport import CaseResult
+
+        pending = list(self._pending_score_results)
+        results = await asyncio.gather(*(
+            persist_best_score(UUID(entry["coders_id"]), entry["name"], entry["score"], case_result=CaseResult(**entry["result"]))
+            for entry in pending
+        ), return_exceptions=True)
+        completed = [entry for entry, result in zip(pending, results, strict=True) if not isinstance(result, BaseException)]
+        if len(completed) < len(pending):
+            logger.warning("Some completed case results remain pending for retry")
+        if completed:
+            async with self.mutation_lock:
+                self._pending_score_results = [entry for entry in self._pending_score_results if entry not in completed]
+                try:
+                    await self.commit()
+                except RoomRecoveringError:
+                    pass  # The durable intent remains; a retry is idempotent.
 
     def _set_phase(self, phase: str, seconds: int) -> None:
         self._voice_generation += 1
@@ -2409,6 +2579,16 @@ class Room:
         self.phase_id = secrets.token_urlsafe(12)
         self.phase_started_at = time.time()
         self.deadline = time.time() + seconds if seconds else 0
+        channels: Counter[str] = Counter()
+        for player in self.players.values():
+            channel = self._voice_channel(player)
+            if not (player.voice and player.connected and not player.is_bot and channel):
+                continue
+            if channels[channel] >= VOICE_MAX_PARTICIPANTS:
+                player.voice = False
+                self._voice_notices[player.id] = "음성 채널이 합쳐져 정원 12명에 도달했습니다. 자리가 생기면 음성 참여를 다시 눌러 주세요."
+            else:
+                channels[channel] += 1
 
     def _guide_for(self, viewer: Player) -> str:
         if self.phase == "lobby":
@@ -2740,6 +2920,11 @@ class Room:
         }
 
     async def broadcast(self) -> None:
+        async with self.mutation_lock:
+            await self.commit()
+            await self._broadcast_committed()
+
+    async def _broadcast_committed(self) -> None:
         """Send changed snapshots without letting slow sockets pile up.
 
         The ticker still runs once per second so phase deadlines remain precise,
@@ -2753,6 +2938,12 @@ class Room:
                 socket = player.ws
                 if not player.connected or socket is None:
                     continue
+                notice = self._voice_notices.pop(player.id, None)
+                if notice:
+                    try:
+                        await asyncio.wait_for(socket.send_text(json.dumps({"t": "notice", "message": notice}, ensure_ascii=False)), timeout=settings.broadcast_timeout)
+                    except Exception:
+                        continue
                 state = self._state_for(player)
                 # Clock calibration changes on every read, but must not turn
                 # unchanged rooms back into a per-second snapshot flood.
@@ -2785,6 +2976,8 @@ class Room:
                         if recipient.ws is recipient_socket:
                             recipient.connected = False
                             recipient.ws = None
+                            if self._store is not None and not self.connected_participants:
+                                self._pause_clock()
 
                 sends.append(deliver())
             if sends:
@@ -2795,16 +2988,145 @@ class RoomManager:
     def __init__(self, max_rooms: int | None = None) -> None:
         self._rooms: dict[str, Room] = {}
         self.max_rooms = max_rooms or settings.max_rooms
+        self._store: RoomStore | None = None
+        self._persistence_ready = False
+        self._maintenance_task: asyncio.Task | None = None
+        self._shutting_down = False
+
+    @property
+    def persistence_ready(self) -> bool:
+        return self._store is None or (self._persistence_ready and self._store.locally_valid)
+
+    async def start_persistence(self, store: RoomStore | None = None) -> None:
+        self._shutting_down = False
+        if store is None and not settings.room_persistence_enabled:
+            return
+        if self._maintenance_task and not self._maintenance_task.done():
+            return
+        self._store = store or RoomStore(
+            lease_seconds=settings.room_lease_seconds,
+            ttl_seconds=settings.room_checkpoint_ttl_seconds,
+        )
+        await self._try_acquire()
+        self._maintenance_task = asyncio.create_task(self._maintain_lease())
+
+    async def _try_acquire(self) -> None:
+        assert self._store is not None
+        # A fresh lease is insufficient until recovered objects are installed.
+        # Keep admission closed across EVERY await during the handover.
+        self._persistence_ready = False
+        try:
+            pending_tasks = []
+            for previous in self._rooms.values():
+                for task in (previous._task, previous._score_task):
+                    if task and not task.done():
+                        task.cancel()
+                        pending_tasks.append(task)
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
+            if not await self._store.acquire():
+                return
+            rows = await self._store.load_all(self.max_rooms)
+            restored = {}
+            for payload, revision in rows:
+                room = decode_room(payload)
+                room._store, room._manager = self._store, self
+                room._durable_checkpoint, room._durable_revision = payload, revision
+                restored[room.name] = room
+            self._rooms = restored
+            self._persistence_ready = True
+            for room in restored.values():
+                room._schedule_scores()
+        except Exception as error:
+            # Schema mismatch/corruption is not silently replaced by an empty
+            # game. Do not leak connection strings, keys or checkpoint JSON.
+            self._persistence_ready = False
+            logger.warning("Room recovery unavailable (%s)", type(error).__name__)
+            try:
+                await self._store.release()
+            except Exception:
+                self._store.epoch = None
+
+    async def _maintain_lease(self) -> None:
+        assert self._store is not None
+        interval = max(1.0, min(3.0, self._store.lease_seconds / 4))
+        while True:
+            await asyncio.sleep(interval)
+            if self.persistence_ready:
+                try:
+                    if await self._store.renew():
+                        continue
+                except Exception:
+                    self._store.epoch = None
+                self._persistence_ready = False
+            for room in list(self._rooms.values()):
+                async with room.mutation_lock:
+                    await room.suspend()
+            await self._try_acquire()
+
+    async def stop_persistence(self) -> None:
+        self._shutting_down = True
+        if self._maintenance_task:
+            self._maintenance_task.cancel()
+            try:
+                await self._maintenance_task
+            except asyncio.CancelledError:
+                pass
+            self._maintenance_task = None
+        if self._store is None:
+            return
+        self._persistence_ready = False
+        for room in list(self._rooms.values()):
+            pending_tasks = []
+            for task in (room._task, room._score_task):
+                if task and not task.done():
+                    task.cancel()
+                    pending_tasks.append(task)
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
+            async with room.mutation_lock:
+                sockets = [p.ws for p in room.players.values() if p.ws is not None]
+                room._pause_clock()
+                for player in room.players.values():
+                    if not player.is_bot:
+                        player.connected = False
+                    player.ws = player.socket_owner = None
+                    player.voice = False
+                try:
+                    await room.commit()
+                except RoomRecoveringError:
+                    pass
+                for socket in sockets:
+                    try:
+                        await socket.close(code=4008, reason="room_recovering")
+                    except Exception:
+                        pass
+        try:
+            await self._store.release()
+        except Exception:
+            self._store.epoch = None
 
     def find(self, name: str) -> Room | None:
         """Look up an invitation without implicitly creating a new room."""
-        return self._rooms.get(name)
+        room = self._rooms.get(name)
+        if room is not None and self._store is not None and not room.connected_players:
+            expiry = self._store.expiries.get(name, float("inf"))
+            if expiry <= time.time():
+                for task in (room._task, room._score_task):
+                    if task:
+                        task.cancel()
+                self._rooms.pop(name, None)
+                return None
+        return room
 
     def get(self, name: str) -> Room:
+        self.find(name)  # Enforce retention even for restored rooms without a ticker.
         if name not in self._rooms:
             if len(self._rooms) >= self.max_rooms:
                 raise RoomCapacityError("room_capacity")
-            self._rooms[name] = Room(name)
+            room = Room(name)
+            room._manager, room._store = self, self._store
+            self._rooms[name] = room
         return self._rooms[name]
 
     def sweep(self, name: str) -> None:

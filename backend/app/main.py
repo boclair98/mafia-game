@@ -16,9 +16,11 @@ from app.routes.ws import router as ws_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await rooms.start_persistence()
     try:
         yield
     finally:
+        await rooms.stop_persistence()
         # Close pooled DB connections during rolling deploys so the managed
         # Postgres instance does not retain half-open connections from old pods.
         await engine.dispose()
@@ -58,6 +60,10 @@ app.include_router(ws_router)
 
 @app.get("/api/health")
 async def health() -> JSONResponse:
+    if settings.room_persistence_enabled and not rooms.persistence_ready:
+        return JSONResponse(
+            status_code=503, content={"status": "recovering", "detail": "room_storage"}
+        )
     try:
         async with AsyncSessionLocal() as session:
             await session.execute(text("SELECT 1"))
@@ -87,7 +93,12 @@ async def public_status() -> JSONResponse:
     """Dependency-free public presence numbers; never exposes room names."""
     return JSONResponse(
         content={
-            "status": "online",
+            "status": "online" if not settings.room_persistence_enabled or rooms.persistence_ready else "recovering",
+            "room_recovery": {
+                "enabled": settings.room_persistence_enabled,
+                "ready": rooms.persistence_ready if settings.room_persistence_enabled else True,
+                "mode": "single_authority" if settings.room_persistence_enabled else "memory",
+            },
             "players": rooms.online,
             "rooms": rooms.room_count,
             "active_matches": rooms.active_matches,

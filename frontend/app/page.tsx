@@ -17,7 +17,7 @@ import type { GameState, PlayerState, Role, WelcomeMsg } from "@/lib/game";
 import { fetchGameStatus, fetchLeaderboard, fetchPassport, type GameStatus, type LeaderboardEntry, type Passport } from "@/lib/api";
 import { signInHref, useMe } from "@/lib/identity";
 import { getActiveChapter, getCaseNarrative, getEndingLine, getNarrativeLine, type CaseNarrative } from "@/lib/narrative";
-import { VoiceRoom, type VoiceSignal } from "@/lib/voice";
+import { VoiceRoom, type VoiceSignal, type VoiceConfiguration, type VoiceConnection } from "@/lib/voice";
 import { type ConnStatus, GameSocket, gameSocketUrl } from "@/lib/ws";
 
 const ROLE_META: Record<Role, { name: string; icon: typeof Skull; copy: string; color: string; goal: string; power: string; cover: string }> = {
@@ -188,6 +188,7 @@ export default function GamePage() {
   const [voiceOn, setVoiceOn] = useState(true);
   const [voiceChatOn, setVoiceChatOn] = useState(false);
   const [voiceScope, setVoiceScope] = useState<string | null>(null);
+  const [voiceConnection, setVoiceConnection] = useState<VoiceConnection>({ state: "idle", connectedPeers: 0, expectedPeers: 0, receivingPeers: 0, playbackBlocked: false, relayConfigured: false });
   const [micMuted, setMicMuted] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -211,6 +212,8 @@ export default function GamePage() {
   const decisionFlashTimer = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const voiceRoomRef = useRef<VoiceRoom | null>(null);
+  const voiceIntentRef = useRef(false);
+  const voiceConfigurationRef = useRef<VoiceConfiguration | null>(null);
   const voiceJoinPendingRef = useRef(false);
   const voiceAccessRef = useRef<{ scope: string | null; ids: string[] }>({ scope: null, ids: [] });
   const lastCountdownBeep = useRef<number | null>(null);
@@ -448,6 +451,7 @@ export default function GamePage() {
 
 
   useEffect(() => () => {
+    voiceIntentRef.current = false;
     if (phaseAlertTimer.current) window.clearTimeout(phaseAlertTimer.current);
     if (ballotRevealTimer.current) window.clearTimeout(ballotRevealTimer.current);
     if (decisionFlashTimer.current) window.clearTimeout(decisionFlashTimer.current);
@@ -591,6 +595,7 @@ export default function GamePage() {
         setStatus(nextStatus);
       },
       onFatal: (reason) => {
+        voiceIntentRef.current = false;
         voiceRoomRef.current?.stop();
         voiceRoomRef.current = null;
         setVoiceChatOn(false);
@@ -599,7 +604,9 @@ export default function GamePage() {
         setJoined(false);
         setJoinOpen(true);
         setNotice(
-          reason === "room_not_found"
+          reason === "seat_unauthorized"
+            ? "이 좌석은 다른 로그인 계정의 기록입니다. 플레이하던 계정으로 다시 로그인한 뒤 접속해 주세요. 좌석 식별키는 유지됩니다."
+            : reason === "room_not_found"
             ? "이 코드를 사용하는 방이 없습니다. 초대 코드나 링크를 확인해 주세요."
             : reason === "session_replaced"
               ? "다른 탭에서 이 사건에 접속했습니다. 게임은 최신 탭에서 이어집니다."
@@ -615,9 +622,18 @@ export default function GamePage() {
         // Clear it when the player explicitly starts another entry attempt.
       },
       onMessage: (raw) => {
-        const msg = raw as WelcomeMsg | GameState | { t: "error" | "notice"; message: string } | { t: "voice_signal"; from: string; data: VoiceSignal; scope: string };
+        const msg = raw as WelcomeMsg | GameState | VoiceConfiguration | { t: "error" | "notice"; message: string } | { t: "voice_signal"; from: string; data: VoiceSignal; scope: string };
         if (msg.t === "welcome") {
+          if (voiceRoomRef.current?.rebindIdentity(msg.id)) {
+            voiceAccessRef.current = { scope: null, ids: [] };
+            setVoiceScope(null);
+          }
           setWelcome(msg as WelcomeMsg);
+          // Only an authenticated resumed welcome can re-announce voice intent.
+          if (voiceIntentRef.current) {
+            socketRef.current?.send({ t: "voice_config" });
+            socketRef.current?.send({ t: "voice_presence", enabled: true });
+          }
         } else if (msg.t === "state") {
           const next = msg as GameState;
           const pending = pendingDecisionRef.current;
@@ -744,6 +760,9 @@ export default function GamePage() {
           window.setTimeout(() => setNotice(""), 3200);
         } else if (msg.t === "voice_signal") {
           void voiceRoomRef.current?.handleSignal(msg.from, msg.data, msg.scope);
+        } else if (msg.t === "voice_config") {
+          voiceConfigurationRef.current = msg;
+          voiceRoomRef.current?.configureIce(msg);
         }
       },
     });
@@ -805,19 +824,19 @@ export default function GamePage() {
   }, [ballotReveal]);
 
   useEffect(() => {
-    if (!voiceChatOn) return;
+    if (!voiceChatOn || status !== "open") return;
     if (!myVoicePresent) {
       voiceRoomRef.current?.configureScope(voiceScope, []);
       if (voiceScope) socketRef.current?.send({ t: "voice_presence", enabled: true });
       return;
     }
     void voiceRoomRef.current?.syncPeers(voiceScope, voicePeerKey ? voicePeerKey.split("|") : []);
-  }, [myVoicePresent, voiceChatOn, voicePeerKey, voiceScope]);
+  }, [myVoicePresent, status, voiceChatOn, voicePeerKey, voiceScope]);
 
   useEffect(() => {
     if (!voiceChatOn) return;
-    voiceRoomRef.current?.setMicEnabled(myVoicePresent && voiceCanSpeak && !micMuted);
-  }, [micMuted, myVoicePresent, voiceCanSpeak, voiceChatOn, voiceScope]);
+    voiceRoomRef.current?.setMicEnabled(status === "open" && myVoicePresent && voiceCanSpeak && !micMuted);
+  }, [micMuted, myVoicePresent, status, voiceCanSpeak, voiceChatOn, voiceScope]);
 
   const submitJoin = (event: FormEvent) => {
     event.preventDefault();
@@ -840,6 +859,8 @@ export default function GamePage() {
   };
 
   const cancelJoin = () => {
+    voiceIntentRef.current = false;
+    voiceConfigurationRef.current = null;
     voiceRoomRef.current?.stop();
     voiceRoomRef.current = null;
     setVoiceChatOn(false);
@@ -920,6 +941,13 @@ export default function GamePage() {
     return index >= 0 ? `${String(index + 1).padStart(2, "0")} · ${name}` : name;
   };
   const voiceCount = game?.players.filter((player) => player.voice).length ?? 0;
+  const voicePermissionLabel = !voiceCanSpeak ? "단계에 따라 자동 음소거" : micMuted ? "마이크 꺼짐" : "마이크 켜짐";
+  const voiceConnectionLabel = status !== "open" ? "서버 재연결 중 · 마이크 일시 중지"
+    : !myVoicePresent ? "음성 참여 상태 확인 중"
+      : voiceConnection.expectedPeers === 0 ? `${voiceCount}명 참여 · 대화 상대 대기`
+        : voiceConnection.state === "failed" ? "일부 음성 연결 실패 · 다시 연결해 주세요"
+          : voiceConnection.state === "recovering" ? "음성 연결 자동 복구 중"
+            : `${voiceConnection.connectedPeers}/${voiceConnection.expectedPeers}명 음성 연결 · ${voiceConnection.receivingPeers > 0 ? "음성 수신 중" : voicePermissionLabel}`;
 
   const targetPlayers = useMemo(() => {
     if (!game || !game.me.alive || role === "spectator") return [];
@@ -1130,6 +1158,7 @@ export default function GamePage() {
   const toggleVoiceChat = async () => {
     if (voiceJoinPendingRef.current) return;
     if (voiceChatOn) {
+      voiceIntentRef.current = false;
       send({ t: "voice_presence", enabled: false });
       voiceRoomRef.current?.stop();
       voiceRoomRef.current = null;
@@ -1146,14 +1175,18 @@ export default function GamePage() {
         setNotice(message);
         window.setTimeout(() => setNotice(""), 3600);
       },
+      (summary) => { if (voiceRoomRef.current === room) setVoiceConnection(summary); },
+      () => { socketRef.current?.send({ t: "voice_config" }); },
     );
     voiceRoomRef.current = room;
+    if (voiceConfigurationRef.current) room.configureIce(voiceConfigurationRef.current);
     try {
       await room.start();
       if (voiceRoomRef.current !== room) { room.stop(); return; }
       const access = voiceAccessRef.current;
       room.configureScope(access.scope, access.ids);
       setVoiceChatOn(true);
+      voiceIntentRef.current = true;
       setMicMuted(false);
       send({ t: "voice_presence", enabled: true });
     } catch (error) {
@@ -1394,7 +1427,7 @@ export default function GamePage() {
       <div className="grain" />
       <div className="city-atmosphere" aria-hidden="true"><i /><i /><i /></div>
       {notice && <div className="toast" role="status">{notice}</div>}
-      {status !== "open" && <div className="reconnect-veil" role="status" aria-live="assertive"><div><Radio size={22} /><span><b>사건 기록 재연결 중</b><small>현재 판은 그대로 유지됩니다. 연결 표시가 돌아온 뒤 선택을 다시 전송해 주세요.</small></span></div></div>}
+      {status !== "open" && <div className="reconnect-veil" role="status" aria-live="assertive"><div><Radio size={22} /><span><b>사건 기록 재연결 중</b><small>저장된 사건 기록을 불러옵니다. 복구 확인 뒤 선택을 다시 전송해 주세요.</small></span><button type="button" onClick={() => socketRef.current?.retry()}>지금 다시 연결</button></div></div>}
       {decisionFlash && <div className="decision-flash" role="status"><LockKeyhole size={18} /><span><small>COMMAND SEALED</small><b>{decisionFlash.label}</b><em>{decisionFlash.target}</em></span></div>}
       {phaseAlert && alertMeta && (
         <div className={`phase-alert phase-alert-${phaseAlert}`} role="status" aria-live="assertive">
@@ -1614,12 +1647,13 @@ export default function GamePage() {
             {game.phase === "gameover" && <div className="case-file"><b>사건 파일 · 최종 배역</b><div>{game.players.filter((p) => p.role).map((p) => <span key={p.id}>{p.n} — {p.role ? ROLE_META[p.role].name : "?"} · {p.score}점</span>)}</div></div>}
           </div>
           <div className="chat-card">
-            <div className={`voice-chat-bar ${voiceChatOn ? "connected" : ""}`}>
-              <div><Headphones size={16} /><span><b>{voiceChannelName}</b><small>{voiceChatOn ? `${voiceCount}명 연결 · ${voiceCanSpeak ? "발언 가능" : "현재 단계 자동 음소거"}` : "마이크 권한을 허용한 참가자끼리 대화"}</small></span></div>
+            <div className={`voice-chat-bar ${voiceConnection.connectedPeers > 0 ? "connected" : ""}`}>
+              <div><Headphones size={16} /><span><b>{voiceChannelName}</b><small data-testid="voice-status" data-connection-state={voiceConnection.state} data-connected-peers={voiceConnection.connectedPeers} role="status" aria-live="polite" aria-label="음성 연결 상태">{voiceChatOn ? voiceConnectionLabel : "마이크 권한을 허용한 참가자끼리 대화"}</small></span></div>
               <div className="voice-chat-actions">
-                {voiceChatOn && <button onClick={() => setMicMuted((muted) => !muted)} disabled={!voiceCanSpeak} aria-label={micMuted ? "마이크 켜기" : "마이크 끄기"}>{micMuted || !voiceCanSpeak ? <MicOff size={15} /> : <Mic size={15} />}</button>}
+                {voiceChatOn && <button onClick={() => setMicMuted((muted) => !muted)} disabled={!voiceCanSpeak || status !== "open"} aria-pressed={!micMuted && voiceCanSpeak && status === "open"} aria-label={micMuted ? "마이크 켜기" : "마이크 끄기"}>{micMuted || !voiceCanSpeak ? <MicOff size={15} /> : <Mic size={15} />}</button>}
                 <button className={voiceChatOn ? "leave" : "join"} onClick={() => void toggleVoiceChat()}>{voiceChatOn ? <><PhoneOff size={14} />나가기</> : <><Mic size={14} />음성 참여</>}</button>
               </div>
+              {voiceChatOn && <div className="voice-connection-detail"><small>{voiceConnection.relayConfigured ? "중계 서버 사용 가능" : "직접 연결 모드 · 회사·학교망 등에서는 연결이 제한될 수 있습니다."}</small><div><button data-testid="voice-retry" type="button" disabled={status !== "open"} onClick={() => void voiceRoomRef.current?.retry()}><RotateCcw size={14} />음성 다시 연결</button>{voiceConnection.playbackBlocked && <button data-testid="voice-unlock" type="button" onClick={() => void voiceRoomRef.current?.resumePlayback()}><Volume2 size={14} />음성 재생</button>}</div></div>}
             </div>
             <div className="chat-title"><div><MessageCircle size={16} /><b>{ghostChannel ? "유령 전용 비밀 대화" : game.phase === "night" && role === "mafia" ? "마피아 비밀 채팅" : game.phase === "day" ? "자유 토론 채널" : "테이블 대화"}</b></div><span>{canChat ? (game.phase === "day" && isCurrentSpeaker ? "집중 발언 중" : "대화 가능") : "침묵 중"}</span></div>
             <div className="chat-scroll" ref={chatScrollRef} role="log" aria-label="대화 기록" aria-live="off" tabIndex={0} onScroll={(event) => {
@@ -1816,7 +1850,7 @@ const LEGAL_COPY: Record<LegalPage, { kicker: string; title: string; intro: stri
   ] },
   privacy: { kicker: "PRIVACY", title: "개인정보 처리 안내", intro: "게임 진행에 필요한 최소한의 정보만 처리합니다.", sections: [
     { title: "처리 정보", body: "닉네임, 익명 플레이어 식별키, 게임 점수, 신고 내용이 처리됩니다. 음성은 WebRTC로 참가자 사이에 실시간 전송되며 서버에 녹음하거나 저장하지 않습니다." },
-    { title: "보관과 삭제", body: "진행 중 방 상태와 대화는 서버 메모리에 유지되며 방 정리 또는 서버 종료 시 사라집니다. 로그인한 플레이어의 점수·XP·완주 결과 요약은 데이터베이스에 보관합니다. 차단 목록과 설정은 사용자의 기기에 저장됩니다." },
+    { title: "보관과 삭제", body: "서버 재시작 후 경기 복구를 위해 방 상태·대화·플레이어 식별키를 데이터베이스에 저장합니다. 24시간 활동이 없는 방은 복구 대상에서 제외하며 이후 서버 정리 작업에서 삭제합니다. 서버가 꺼져 있으면 실제 삭제 시점은 늦어질 수 있습니다. 로그인한 플레이어의 점수·XP·완주 결과 요약은 별도로 보관합니다. 차단 목록과 설정은 사용자의 기기에 저장됩니다." },
     { title: "권한", body: "마이크 권한은 음성 채팅에 참여할 때만 요청합니다. 권한을 거부해도 텍스트 게임은 계속 이용할 수 있습니다." },
   ] },
   community: { kicker: "COMMUNITY SAFETY", title: "커뮤니티 가이드", intro: "거짓말은 역할 안에서만, 존중은 항상 지켜주세요.", sections: [

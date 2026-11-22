@@ -1,0 +1,79 @@
+name: Bounded protocol load
+
+on:
+  workflow_dispatch:
+    inputs:
+      users:
+        description: Synthetic concurrent loopback clients (not production capacity)
+        type: choice
+        required: true
+        default: '100'
+        options: ['25', '50', '100']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: black-midnight-bounded-load-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  load:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app_load
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d app_load"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql+asyncpg://app:app@localhost:5432/app_load
+      ROOM_PERSISTENCE_ENABLED: 'true'
+      ROOM_CLOCK_CHECKPOINT_SECONDS: '5'
+      LOAD_USERS: ${{ inputs.users }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - run: python -m alembic upgrade head
+      - name: Start isolated normal-clock API
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8011 --no-access-log --log-level warning > "$RUNNER_TEMP/load-api.log" 2>&1 &
+          printf 'LOAD_API_PID=%s\n' "$!" >> "$GITHUB_ENV"
+          for attempt in {1..45}; do
+            if curl --fail --silent http://127.0.0.1:8011/api/health > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Exercise bounded gameplay and same-seat reconnect
+        run: |
+          case "$LOAD_USERS" in 25|50|100) ;; *) exit 2 ;; esac
+          python -m tools.ws_load --url ws://127.0.0.1:8011/api/ws --stages "$LOAD_USERS" --room-size 4 --join-rate 2 --duration 420 --json-output "$RUNNER_TEMP/mafia-load.json"
+      - name: Read-only API process sample
+        if: always()
+        run: |
+          if [ -n "$LOAD_API_PID" ] && [ -r "/proc/$LOAD_API_PID/status" ]; then
+            awk '/VmRSS:|VmHWM:|Threads:/' "/proc/$LOAD_API_PID/status"
+            ps -p "$LOAD_API_PID" -o pid=,time=,pcpu=,etime=
+          fi
+      - name: Stop only the test API
+        if: always()
+        run: |
+          if [ -n "$LOAD_API_PID" ]; then kill -TERM "$LOAD_API_PID" || true; fi
+      # Safe JSON is retained in job logs. No frame/key/server-log artifact is
+      # uploaded, and no paid runner, infrastructure or public load is used.

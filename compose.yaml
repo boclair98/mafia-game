@@ -52,6 +52,7 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://app:app@db:5432/app
+      ROOM_PERSISTENCE_ENABLED: "true"
       # No platform gate locally → treat every request as this signed-in dev
       # user (see app/core/identity.py). Override in backend/.env if you want
       # to test as a different user, or unset to exercise the anonymous path.

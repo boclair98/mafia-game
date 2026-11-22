@@ -121,6 +121,9 @@ class CaseRun(Base):
     """A compact replay index for a signed-in investigator's case archive."""
 
     __tablename__ = "case_runs"
+    __table_args__ = (
+        sa.UniqueConstraint("user_id", "match_id", name="uq_case_runs_user_match"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         sa.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -128,6 +131,8 @@ class CaseRun(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # Historical rows have no match identifier. New recovered games always do.
+    match_id: Mapped[uuid.UUID | None] = mapped_column(sa.UUID(as_uuid=True))
     case_code: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     case_title: Mapped[str] = mapped_column(sa.String(160), nullable=False)
     mode: Mapped[str] = mapped_column(sa.String(16), nullable=False)
@@ -143,3 +148,27 @@ class CaseRun(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="case_runs")
+
+
+class RuntimeLease(Base):
+    """One fenced game runtime. This is not a horizontal room router."""
+
+    __tablename__ = "game_runtime_leases"
+
+    name: Mapped[str] = mapped_column(sa.String(40), primary_key=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(sa.UUID(as_uuid=True), nullable=False)
+    epoch: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    lease_until: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+
+
+class RoomCheckpoint(Base):
+    """Private authoritative state; never expose this JSON through an API."""
+
+    __tablename__ = "game_room_checkpoints"
+
+    name: Mapped[str] = mapped_column(sa.String(32), primary_key=True)
+    revision: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    lease_epoch: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    payload: Mapped[dict] = mapped_column(sa.JSON, nullable=False)
+    saved_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, index=True)

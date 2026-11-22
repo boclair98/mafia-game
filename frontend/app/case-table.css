@@ -118,6 +118,15 @@
 .game-shell .voice-chat-bar b { font-size: 12px; }
 .game-shell .voice-chat-bar small { font-size: 11px; }
 .game-shell .voice-chat-actions { margin-left: auto; }
+.game-shell .voice-chat-bar { flex-wrap: wrap; }
+.game-shell .voice-chat-bar > div:first-child { flex: 1 1 150px; }
+.game-shell .voice-chat-bar small { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.6; }
+.game-shell .voice-connection-detail { flex: 1 0 100%; min-width: 0; padding-top: 10px; border-top: 1px solid var(--case-line); }
+.game-shell .voice-connection-detail > div { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.game-shell .voice-connection-detail button, .reconnect-veil button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--case-line, #344051); border-radius: 8px; background: #141b25; color: #f0ece3; font-size: 12px; cursor: pointer; }
+.game-shell .voice-connection-detail button:disabled { opacity: .5; cursor: not-allowed; }
+.reconnect-veil > div { flex-wrap: wrap; }
+.reconnect-veil span { min-width: 0; flex: 1 1 190px; }
 .game-shell .player-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 16px; gap: 12px; scroll-margin-block: 24px 160px; }
 .game-shell .player-card { min-height: 180px; border-radius: 10px; }
 .game-shell .portrait { min-height: 88px; }

@@ -1,24 +1,11 @@
 "use client";
 
-/**
- * A reconnecting WebSocket for the game.
- *
- * On this platform a dropped socket is NORMAL, not exceptional
- * (PLATFORM.md §5a): Spot-node preemption, a redeploy rolling the
- * revision, and idle scale-to-zero all sever open connections. So
- * reconnect-with-backoff is the core of this class, not an
- * afterthought — the server treats every (re)connect as a fresh join
- * and the next state snapshot repaints the whole world, so there's no
- * session to resume.
- *
- * Keepalive: an app-level {"t":"ping"} every 20s keeps intermediaries
- * from reaping a quiet socket. Idle WebSockets are ~free (billed by
- * egress bytes, not open-time — §5b), so this costs nothing real.
- */
+/** Reconnect the same seat; gameplay commands are never queued or replayed. */
 
 export type ConnStatus = "connecting" | "open" | "reconnecting" | "failed";
 
 const PING_INTERVAL_MS = 20_000;
+const HEARTBEAT_TIMEOUT_MS = 45_000;
 const BACKOFF_BASE_MS = 500;
 const BACKOFF_CAP_MS = 8_000;
 // A cold-started API can take roughly 30 seconds to accept its first socket.
@@ -44,13 +31,15 @@ export function gameSocketUrl(room: string, nick: string, key: string, joinOnly 
 type Handlers = {
   onMessage: (msg: unknown) => void;
   onStatus: (status: ConnStatus) => void;
-  onFatal?: (reason: "room_full" | "solo_room" | "removed_by_host" | "server_busy" | "room_not_found" | "session_replaced") => void;
+  onFatal?: (reason: "room_full" | "solo_room" | "removed_by_host" | "server_busy" | "room_not_found" | "session_replaced" | "seat_unauthorized") => void;
 };
 
 export class GameSocket {
   private ws: WebSocket | null = null;
   private attempts = 0;
   private closed = false;
+  private connectedOnce = false;
+  private lastReceivedAt = 0;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -59,70 +48,122 @@ export class GameSocket {
     private readonly url: string,
     private readonly handlers: Handlers
   ) {
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", this.wake);
+      window.addEventListener("offline", this.offline);
+    }
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", this.wake);
     this.connect();
   }
 
   /** Returns false when the caller needs to keep the user's input visible
    *  and ask them to retry after the connection recovers. */
   send(msg: object): boolean {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg));
-      return true;
-    }
-    return false;
+    if (this.closed || this.ws?.readyState !== WebSocket.OPEN) return false;
+    try { this.ws.send(JSON.stringify(msg)); return true; }
+    catch { this.restart(); return false; }
   }
+
+  retry(): void { if (!this.closed) this.restart(); }
 
   close(): void {
     this.closed = true;
+    this.clearTimers();
+    if (typeof window !== "undefined") {
+      window.removeEventListener("online", this.wake);
+      window.removeEventListener("offline", this.offline);
+    }
+    if (typeof document !== "undefined") document.removeEventListener("visibilitychange", this.wake);
+    const old = this.ws;
+    this.ws = null;
+    old?.close();
+  }
+
+  private networkOnline(): boolean { return typeof navigator === "undefined" || navigator.onLine !== false; }
+
+  private offline = (): void => {
+    if (this.closed) return;
+    this.handlers.onStatus("reconnecting");
+    this.clearTimers();
+    const old = this.ws;
+    this.ws = null;
+    old?.close();
+  };
+
+  private wake = (): void => {
+    if (this.closed || !this.networkOnline() || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
+    if (this.ws?.readyState === WebSocket.OPEN && Date.now() - this.lastReceivedAt < PING_INTERVAL_MS) {
+      this.send({ t: "ping" });
+      return;
+    }
+    this.restart();
+  };
+
+  private clearTimers(): void {
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.connectTimer) clearTimeout(this.connectTimer);
-    this.ws?.close();
+    this.pingTimer = this.reconnectTimer = this.connectTimer = null;
+  }
+
+  private restart(): void {
+    if (this.closed) return;
+    this.clearTimers();
+    const old = this.ws;
+    this.ws = null;
+    old?.close();
+    this.handlers.onStatus("reconnecting");
+    this.connect();
   }
 
   private connect(): void {
-    this.handlers.onStatus(this.attempts === 0 ? "connecting" : "reconnecting");
+    if (this.closed) return;
+    this.handlers.onStatus(this.connectedOnce || this.attempts > 0 ? "reconnecting" : "connecting");
+    if (!this.networkOnline()) return;
     const ws = (this.ws = new WebSocket(this.url));
     this.connectTimer = setTimeout(() => {
-      if (this.closed || this.ws !== ws || ws.readyState !== WebSocket.CONNECTING) return;
-      // Closing a stalled handshake funnels through the same backoff path as
-      // a normal dropped socket and gives the UI a recoverable state.
-      ws.close();
+      if (!this.closed && this.ws === ws) this.restart();
     }, CONNECT_TIMEOUT_MS);
 
     ws.onopen = () => {
-      if (this.connectTimer) clearTimeout(this.connectTimer);
-      this.connectTimer = null;
-      this.attempts = 0;
-      this.handlers.onStatus("open");
+      if (this.closed || this.ws !== ws) return;
+      this.lastReceivedAt = Date.now();
+      // An upgraded TCP connection is not yet an authoritative recovered game.
       if (this.pingTimer) clearInterval(this.pingTimer);
-      this.pingTimer = setInterval(
-        () => this.send({ t: "ping" }),
-        PING_INTERVAL_MS
-      );
+      this.pingTimer = setInterval(() => {
+        if (this.closed || this.ws !== ws) return;
+        if (Date.now() - this.lastReceivedAt >= HEARTBEAT_TIMEOUT_MS) this.restart();
+        else this.send({ t: "ping" });
+      }, PING_INTERVAL_MS);
     };
 
     ws.onmessage = (ev) => {
       if (this.closed || this.ws !== ws) return;
-      try {
-        this.handlers.onMessage(JSON.parse(ev.data));
-      } catch {
-        /* non-JSON frame — ignore */
+      let message: unknown;
+      try { message = JSON.parse(ev.data); } catch { return; }
+      this.lastReceivedAt = Date.now();
+      if (message && typeof message === "object" && "t" in message && message.t === "state") {
+        if (this.connectTimer) clearTimeout(this.connectTimer);
+        this.connectTimer = null;
+        this.attempts = 0;
+        this.connectedOnce = true;
+        this.handlers.onStatus("open");
       }
+      this.handlers.onMessage(message);
     };
 
     // onerror always precedes onclose; reconnect logic lives in one place.
     ws.onclose = (event) => {
-      if (this.connectTimer) clearTimeout(this.connectTimer);
-      this.connectTimer = null;
-      if (this.pingTimer) clearInterval(this.pingTimer);
-      this.pingTimer = null;
-      if (this.closed) return;
-      if (event.code === 4001 || event.code === 4007 || event.code === 4003 || event.code === 4004 || event.code === 4005 || event.code === 4006) {
-        this.closed = true;
+      if (this.closed || this.ws !== ws) return;
+      this.ws = null;
+      this.clearTimers();
+      if ([4001, 4003, 4004, 4005, 4006, 4007, 4009].includes(event.code)) {
+        this.close();
         this.handlers.onStatus("failed");
         this.handlers.onFatal?.(
-          event.code === 4001
+          event.code === 4009
+            ? "seat_unauthorized"
+            : event.code === 4001
             ? "session_replaced"
             : event.code === 4007
               ? "room_not_found"
@@ -137,13 +178,15 @@ export class GameSocket {
         return;
       }
       this.handlers.onStatus("reconnecting");
+      if (!this.networkOnline()) return;
       // Exponential backoff with jitter so a fleet of clients doesn't
       // stampede the pod that just came back.
       const delay =
-        Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** this.attempts) *
+        Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** Math.min(this.attempts, 10)) *
         (0.5 + Math.random() / 2);
       this.attempts += 1;
-      this.reconnectTimer = setTimeout(() => this.connect(), delay);
+      // 4008 is a retryable durable-runtime/room handoff, not a missing room.
+      this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.connect(); }, delay);
     };
   }
 }
